@@ -28,6 +28,7 @@ type CreateAccessTicketResult struct {
 
 type CreateAccessTicketHandler struct {
 	repo             ports.FileReadRepository
+	policies         ports.TenantPolicyReader
 	issuer           ports.AccessTicketIssuer
 	clock            clock.Clock
 	defaultTTL       time.Duration
@@ -36,6 +37,7 @@ type CreateAccessTicketHandler struct {
 
 func NewCreateAccessTicketHandler(
 	repo ports.FileReadRepository,
+	policies ports.TenantPolicyReader,
 	issuer ports.AccessTicketIssuer,
 	clk clock.Clock,
 	defaultTTL time.Duration,
@@ -47,6 +49,7 @@ func NewCreateAccessTicketHandler(
 
 	return CreateAccessTicketHandler{
 		repo:             repo,
+		policies:         policies,
 		issuer:           issuer,
 		clock:            clk,
 		defaultTTL:       defaultTTL,
@@ -74,6 +77,13 @@ func (h CreateAccessTicketHandler) Handle(ctx context.Context, command CreateAcc
 
 	disposition, err := domain.NormalizeDisposition(command.Disposition)
 	if err != nil {
+		return CreateAccessTicketResult{}, err
+	}
+	policy, err := h.policies.GetByTenantID(ctx, file.TenantID)
+	if err != nil {
+		return CreateAccessTicketResult{}, err
+	}
+	if err := policy.EnsureAllowed(disposition); err != nil {
 		return CreateAccessTicketResult{}, err
 	}
 

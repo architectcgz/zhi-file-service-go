@@ -25,6 +25,26 @@ func ErrFileAccessDenied(fileID string) error {
 	})
 }
 
+func ErrAccessTicketInvalid(ticket string) error {
+	return xerrors.New(CodeAccessTicketInvalid, "access ticket is invalid", xerrors.Details{
+		"resourceType": "accessTicket",
+		"resourceId":   ticket,
+	})
+}
+
+func ErrAccessTicketExpired(ticket string) error {
+	return xerrors.New(CodeAccessTicketExpired, "access ticket is expired", xerrors.Details{
+		"resourceType": "accessTicket",
+		"resourceId":   ticket,
+	})
+}
+
+func ErrDownloadNotAllowed(reason string) error {
+	return xerrors.New(CodeDownloadNotAllowed, "file download is not allowed by current policy", xerrors.Details{
+		"reason": reason,
+	})
+}
+
 func ErrTenantScopeDenied(fileID string) error {
 	return xerrors.New(CodeTenantScopeDenied, "tenant scope denied", xerrors.Details{
 		"resourceType": "file",
