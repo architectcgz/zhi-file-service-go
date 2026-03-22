@@ -103,6 +103,7 @@ paths:
         - FILE_ACCESS_DENIED
         - DOWNLOAD_NOT_ALLOWED
         - TENANT_SCOPE_DENIED
+        - CONFLICT
         - RATE_LIMITED
         - INTERNAL_ERROR
         - SERVICE_UNAVAILABLE
@@ -150,6 +151,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -373,6 +376,19 @@ components:
               message: request rate exceeded current limit
               details:
                 retryAfterSeconds: 30
+    Conflict:
+      description: 请求与已有幂等结果冲突
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPAD20CNZ5G7RXG2Q07A9Q3S
+            error:
+              code: CONFLICT
+              message: idempotency key is already used by another access ticket request
+              details:
+                field: Idempotency-Key
     InternalError:
       description: 服务内部错误
       content:

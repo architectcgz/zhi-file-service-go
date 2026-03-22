@@ -132,8 +132,9 @@ internal/services/access/
 1. 读取文件投影
 2. 校验访问权限
 3. 按策略决定是否允许下载、预览或附件下载
-4. 生成带过期时间的签名票据
-5. 返回票据及可选 redirect URL
+4. 若携带 `Idempotency-Key`，先命中幂等结果缓存
+5. 生成带过期时间的签名票据
+6. 返回票据及可选 redirect URL
 
 票据至少包含：
 
@@ -147,6 +148,13 @@ internal/services/access/
 
 - 为每个票据都写数据库
 - 票据里塞入大量文件元数据
+
+幂等规则：
+
+- `Idempotency-Key` 只约束同一租户、主体、文件下的 `CreateAccessTicket`
+- 相同幂等键且请求语义一致，必须返回首次成功结果
+- 相同幂等键但请求语义不同，返回 `409 CONFLICT`
+- 第一阶段不引入 `access_tickets` 表；幂等记录优先放 Redis，缺失 Redis 时仅允许单实例内存退化
 
 ## 6.3 `ResolveDownload`
 

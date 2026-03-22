@@ -78,19 +78,7 @@ func NewWithOptions(ctx context.Context, options Options) (*App, error) {
 		return nil, err
 	}
 
-	app.runtimeReadyCheck = options.Runtime.Ready
-	app.Server = httpserver.New(httpserver.Options{
-		ServiceName:    cfg.App.ServiceName,
-		HTTP:           cfg.HTTP,
-		Logger:         logger,
-		Ready:          app.Ready,
-		MetricsHandler: app.Metrics.Handler(),
-		Handler:        options.Runtime.Handler,
-	})
-	app.runtimeRegistered.Store(app.Server.HasBusinessHandler() || options.Runtime.Ready != nil)
-	if !app.runtimeRegistered.Load() {
-		logger.Warn("service_runtime_not_registered", "service", cfg.App.ServiceName)
-	}
+	app.registerRuntime(options.Runtime)
 
 	app.ready.Store(true)
 	logger.Info("platform_bootstrap_initialized", "service", cfg.App.ServiceName)
@@ -187,6 +175,10 @@ func (a *App) Ready(ctx context.Context) error {
 	return nil
 }
 
+func (a *App) RegisterRuntime(options RuntimeOptions) {
+	a.registerRuntime(options)
+}
+
 func (a *App) Close(ctx context.Context) error {
 	a.ready.Store(false)
 
@@ -237,4 +229,20 @@ func (a *App) initDependencies(ctx context.Context) error {
 	a.Storage = storageClient
 
 	return nil
+}
+
+func (a *App) registerRuntime(options RuntimeOptions) {
+	a.runtimeReadyCheck = options.Ready
+	a.Server = httpserver.New(httpserver.Options{
+		ServiceName:    a.Config.App.ServiceName,
+		HTTP:           a.Config.HTTP,
+		Logger:         a.Logger,
+		Ready:          a.Ready,
+		MetricsHandler: a.Metrics.Handler(),
+		Handler:        options.Handler,
+	})
+	a.runtimeRegistered.Store(a.Server.HasBusinessHandler() || options.Ready != nil)
+	if !a.runtimeRegistered.Load() && a.Logger != nil {
+		a.Logger.Warn("service_runtime_not_registered", "service", a.Config.App.ServiceName)
+	}
 }

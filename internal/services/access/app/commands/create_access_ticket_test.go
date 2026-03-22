@@ -2,11 +2,13 @@ package commands_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/architectcgz/zhi-file-service-go/internal/services/access/app/commands"
 	"github.com/architectcgz/zhi-file-service-go/internal/services/access/domain"
+	accessidempotency "github.com/architectcgz/zhi-file-service-go/internal/services/access/infra/idempotency"
 	"github.com/architectcgz/zhi-file-service-go/pkg/clock"
 	"github.com/architectcgz/zhi-file-service-go/pkg/storage"
 	"github.com/architectcgz/zhi-file-service-go/pkg/xerrors"
@@ -30,7 +32,7 @@ func TestCreateAccessTicketBindsTenantAndSubject(t *testing.T) {
 	}
 	issuer := &stubTicketIssuer{ticket: "at_01JQ2QFJ7X0C24C25J24E2RYN9"}
 	policies := &stubTenantPolicyReader{policy: domain.TenantPolicy{TenantID: "tenant-a"}}
-	handler := commands.NewCreateAccessTicketHandler(repo, policies, issuer, clock.NewFixed(now), 5*time.Minute, "/api/v1/access-tickets")
+	handler := commands.NewCreateAccessTicketHandler(repo, policies, issuer, nil, clock.NewFixed(now), 5*time.Minute, "/api/v1/access-tickets")
 
 	result, err := handler.Handle(context.Background(), commands.CreateAccessTicketCommand{
 		FileID:       repo.file.FileID,
@@ -83,7 +85,7 @@ func TestCreateAccessTicketRejectsDownloadDisabledPolicy(t *testing.T) {
 		TenantID:         "tenant-a",
 		DownloadDisabled: true,
 	}}
-	handler := commands.NewCreateAccessTicketHandler(repo, policies, &stubTicketIssuer{}, clock.NewFixed(now), 5*time.Minute, "/api/v1/access-tickets")
+	handler := commands.NewCreateAccessTicketHandler(repo, policies, &stubTicketIssuer{}, nil, clock.NewFixed(now), 5*time.Minute, "/api/v1/access-tickets")
 
 	_, err := handler.Handle(context.Background(), commands.CreateAccessTicketCommand{
 		FileID:      repo.file.FileID,
@@ -99,6 +101,157 @@ func TestCreateAccessTicketRejectsDownloadDisabledPolicy(t *testing.T) {
 	}
 }
 
+func TestCreateAccessTicketReturnsStoredResultForSameIdempotencyKey(t *testing.T) {
+	now := time.Date(2026, 3, 22, 9, 0, 0, 0, time.UTC)
+	repo := &stubFileReadRepository{
+		file: domain.FileView{
+			FileID:          "01JQ2QFJ1KRYT0X8S6Q9S7D9A1",
+			TenantID:        "tenant-a",
+			FileName:        "invoice.pdf",
+			AccessLevel:     storage.AccessLevelPrivate,
+			Status:          domain.FileStatusActive,
+			StorageProvider: storage.ProviderS3,
+			BucketName:      "private",
+			ObjectKey:       "tenant-a/invoice.pdf",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+	}
+	issuer := &stubTicketIssuer{
+		ticket:  "at_first",
+		tickets: []string{"at_first", "at_second"},
+	}
+	policies := &stubTenantPolicyReader{policy: domain.TenantPolicy{TenantID: "tenant-a"}}
+	store := accessidempotency.NewMemoryStore(clock.NewFixed(now))
+	handler := commands.NewCreateAccessTicketHandler(repo, policies, issuer, store, clock.NewFixed(now), 5*time.Minute, "/api/v1/access-tickets")
+	command := commands.CreateAccessTicketCommand{
+		FileID:         repo.file.FileID,
+		IdempotencyKey: "ticket-001",
+		ExpiresIn:      2 * time.Minute,
+		Disposition:    domain.DownloadDispositionAttachment,
+		ResponseName:   "invoice.pdf",
+		Auth: domain.AuthContext{
+			SubjectID: "user-1",
+			TenantID:  "tenant-a",
+			Scopes:    []string{domain.ScopeFileRead},
+		},
+	}
+
+	first, err := handler.Handle(context.Background(), command)
+	if err != nil {
+		t.Fatalf("first Handle returned error: %v", err)
+	}
+	second, err := handler.Handle(context.Background(), command)
+	if err != nil {
+		t.Fatalf("second Handle returned error: %v", err)
+	}
+	if first.Ticket != "at_first" {
+		t.Fatalf("first ticket = %q, want %q", first.Ticket, "at_first")
+	}
+	if second.Ticket != first.Ticket {
+		t.Fatalf("second ticket = %q, want %q", second.Ticket, first.Ticket)
+	}
+	if issuer.issueCalls != 1 {
+		t.Fatalf("issue calls = %d, want %d", issuer.issueCalls, 1)
+	}
+}
+
+func TestCreateAccessTicketRejectsIdempotencyConflict(t *testing.T) {
+	now := time.Date(2026, 3, 22, 9, 0, 0, 0, time.UTC)
+	repo := &stubFileReadRepository{
+		file: domain.FileView{
+			FileID:          "01JQ2QFJ1KRYT0X8S6Q9S7D9A1",
+			TenantID:        "tenant-a",
+			FileName:        "invoice.pdf",
+			AccessLevel:     storage.AccessLevelPrivate,
+			Status:          domain.FileStatusActive,
+			StorageProvider: storage.ProviderS3,
+			BucketName:      "private",
+			ObjectKey:       "tenant-a/invoice.pdf",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+	}
+	policies := &stubTenantPolicyReader{policy: domain.TenantPolicy{TenantID: "tenant-a"}}
+	store := accessidempotency.NewMemoryStore(clock.NewFixed(now))
+	handler := commands.NewCreateAccessTicketHandler(repo, policies, &stubTicketIssuer{ticket: "at_first"}, store, clock.NewFixed(now), 5*time.Minute, "/api/v1/access-tickets")
+	base := commands.CreateAccessTicketCommand{
+		FileID:         repo.file.FileID,
+		IdempotencyKey: "ticket-001",
+		Disposition:    domain.DownloadDispositionAttachment,
+		ResponseName:   "invoice.pdf",
+		Auth: domain.AuthContext{
+			SubjectID: "user-1",
+			TenantID:  "tenant-a",
+			Scopes:    []string{domain.ScopeFileRead},
+		},
+	}
+
+	if _, err := handler.Handle(context.Background(), base); err != nil {
+		t.Fatalf("first Handle returned error: %v", err)
+	}
+	_, err := handler.Handle(context.Background(), commands.CreateAccessTicketCommand{
+		FileID:         base.FileID,
+		IdempotencyKey: base.IdempotencyKey,
+		Disposition:    domain.DownloadDispositionInline,
+		ResponseName:   base.ResponseName,
+		Auth:           base.Auth,
+	})
+	if code := xerrors.CodeOf(err); code != xerrors.CodeConflict {
+		t.Fatalf("expected conflict, got %s (err=%v)", code, err)
+	}
+}
+
+func TestCreateAccessTicketReturnsStoredResultWithoutRecheckingRepository(t *testing.T) {
+	now := time.Date(2026, 3, 22, 9, 0, 0, 0, time.UTC)
+	repo := &stubFileReadRepository{
+		file: domain.FileView{
+			FileID:          "01JQ2QFJ1KRYT0X8S6Q9S7D9A1",
+			TenantID:        "tenant-a",
+			FileName:        "invoice.pdf",
+			AccessLevel:     storage.AccessLevelPrivate,
+			Status:          domain.FileStatusActive,
+			StorageProvider: storage.ProviderS3,
+			BucketName:      "private",
+			ObjectKey:       "tenant-a/invoice.pdf",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+	}
+	issuer := &stubTicketIssuer{ticket: "at_first"}
+	policies := &stubTenantPolicyReader{policy: domain.TenantPolicy{TenantID: "tenant-a"}}
+	store := accessidempotency.NewMemoryStore(clock.NewFixed(now))
+	handler := commands.NewCreateAccessTicketHandler(repo, policies, issuer, store, clock.NewFixed(now), 5*time.Minute, "/api/v1/access-tickets")
+	command := commands.CreateAccessTicketCommand{
+		FileID:         repo.file.FileID,
+		IdempotencyKey: "ticket-001",
+		Disposition:    domain.DownloadDispositionAttachment,
+		ResponseName:   "invoice.pdf",
+		Auth: domain.AuthContext{
+			SubjectID: "user-1",
+			TenantID:  "tenant-a",
+			Scopes:    []string{domain.ScopeFileRead},
+		},
+	}
+
+	first, err := handler.Handle(context.Background(), command)
+	if err != nil {
+		t.Fatalf("first Handle returned error: %v", err)
+	}
+
+	repo.err = fmt.Errorf("repository should not be called again")
+	second, err := handler.Handle(context.Background(), command)
+	if err != nil {
+		t.Fatalf("second Handle returned error: %v", err)
+	}
+	if second.Ticket != first.Ticket {
+		t.Fatalf("second ticket = %q, want %q", second.Ticket, first.Ticket)
+	}
+	if issuer.issueCalls != 1 {
+		t.Fatalf("issue calls = %d, want %d", issuer.issueCalls, 1)
+	}
+}
+
 type stubFileReadRepository struct {
 	file domain.FileView
 	err  error
@@ -109,12 +262,21 @@ func (s *stubFileReadRepository) GetByID(_ context.Context, _ string) (domain.Fi
 }
 
 type stubTicketIssuer struct {
-	ticket string
-	claims domain.AccessTicketClaims
+	ticket     string
+	tickets    []string
+	issueCalls int
+	claims     domain.AccessTicketClaims
 }
 
 func (s *stubTicketIssuer) Issue(_ context.Context, claims domain.AccessTicketClaims) (string, error) {
+	s.issueCalls++
 	s.claims = claims
+	if len(s.tickets) >= s.issueCalls {
+		return s.tickets[s.issueCalls-1], nil
+	}
+	if s.ticket == "" {
+		return "", fmt.Errorf("ticket is not configured")
+	}
 	return s.ticket, nil
 }
 
