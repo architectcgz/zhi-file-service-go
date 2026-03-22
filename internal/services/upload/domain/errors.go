@@ -3,13 +3,16 @@ package domain
 import "github.com/architectcgz/zhi-file-service-go/pkg/xerrors"
 
 const (
-	CodeUploadSessionNotFound             xerrors.Code = "UPLOAD_SESSION_NOT_FOUND"
+	CodeUploadSessionNotFound            xerrors.Code = "UPLOAD_SESSION_NOT_FOUND"
 	CodeUploadModeInvalid                xerrors.Code = "UPLOAD_MODE_INVALID"
 	CodeUploadHashRequired               xerrors.Code = "UPLOAD_HASH_REQUIRED"
 	CodeUploadHashInvalid                xerrors.Code = "UPLOAD_HASH_INVALID"
 	CodeUploadHashUnsupported            xerrors.Code = "UPLOAD_HASH_UNSUPPORTED"
+	CodeUploadHashMismatch               xerrors.Code = "UPLOAD_HASH_MISMATCH"
 	CodeUploadCompletionOwnershipInvalid xerrors.Code = "UPLOAD_COMPLETION_OWNERSHIP_INVALID"
 	CodeUploadSessionStateConflict       xerrors.Code = "UPLOAD_SESSION_STATE_CONFLICT"
+	CodeUploadCompleteInProgress         xerrors.Code = "UPLOAD_COMPLETE_IN_PROGRESS"
+	CodeUploadPartsMissing               xerrors.Code = "UPLOAD_PARTS_MISSING"
 	CodeTenantQuotaExceeded              xerrors.Code = "TENANT_QUOTA_EXCEEDED"
 	CodeMimeTypeNotAllowed               xerrors.Code = "MIME_TYPE_NOT_ALLOWED"
 )
@@ -47,9 +50,29 @@ func errUploadHashUnsupported(algorithm string) error {
 	})
 }
 
+func errUploadHashMismatch(message string) error {
+	return xerrors.New(CodeUploadHashMismatch, message, xerrors.Details{
+		"field": "contentHash",
+	})
+}
+
 func errUploadCompletionOwnershipInvalid(message string) error {
 	return xerrors.New(CodeUploadCompletionOwnershipInvalid, message, xerrors.Details{
 		"field": "completion",
+	})
+}
+
+func errUploadCompleteInProgress(uploadSessionID string) error {
+	return xerrors.New(CodeUploadCompleteInProgress, "upload completion is already in progress", xerrors.Details{
+		"resourceType": "uploadSession",
+		"resourceId":   uploadSessionID,
+	})
+}
+
+func errUploadPartsMissing(expectedParts int, actualParts int) error {
+	return xerrors.New(CodeUploadPartsMissing, "uploaded parts are incomplete", xerrors.Details{
+		"expectedParts": expectedParts,
+		"actualParts":   actualParts,
 	})
 }
 
