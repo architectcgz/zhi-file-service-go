@@ -16,3 +16,4 @@
 - 在业务 runtime 尚未接入前，服务不得通过 readiness，避免出现“探针绿、业务流量全 404”的假健康
 - 对象存储在 startup 和 readiness 都要做真实 `HeadBucket` 校验，不能只验证 endpoint/bucket 配置字符串
 - `UPLOAD_ALLOWED_MODES` 默认值与多份设计文档统一为 `INLINE,PRESIGNED_SINGLE,DIRECT`
+- `bootstrap.NewWithOptions` / `bootstrap.RunWithOptions` 已作为后续服务模块注册 handler / runtime ready check 的正式入口

@@ -16,7 +16,7 @@ func TestReadyReturnsErrorWhenRuntimeIsNotRegistered(t *testing.T) {
 		},
 	}
 	app.ready.Store(true)
-	app.runtimeReady.Store(false)
+	app.runtimeRegistered.Store(false)
 
 	err := app.Ready(context.Background())
 	if err == nil {

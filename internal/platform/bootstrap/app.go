@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -16,6 +17,18 @@ import (
 	platformredis "github.com/architectcgz/zhi-file-service-go/internal/platform/redis"
 	"github.com/architectcgz/zhi-file-service-go/internal/platform/storage"
 )
+
+type RuntimeReadyFunc func(context.Context, *App) error
+
+type RuntimeOptions struct {
+	Handler http.Handler
+	Ready   RuntimeReadyFunc
+}
+
+type Options struct {
+	ServiceName string
+	Runtime     RuntimeOptions
+}
 
 type App struct {
 	Config  config.Config
@@ -28,12 +41,17 @@ type App struct {
 	Storage *storage.Client
 	Server  *httpserver.Server
 
-	ready        atomic.Bool
-	runtimeReady atomic.Bool
+	ready             atomic.Bool
+	runtimeRegistered atomic.Bool
+	runtimeReadyCheck RuntimeReadyFunc
 }
 
 func New(ctx context.Context, serviceName string) (*App, error) {
-	cfg, err := config.Load(serviceName)
+	return NewWithOptions(ctx, Options{ServiceName: serviceName})
+}
+
+func NewWithOptions(ctx context.Context, options Options) (*App, error) {
+	cfg, err := config.Load(options.ServiceName)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
@@ -60,15 +78,17 @@ func New(ctx context.Context, serviceName string) (*App, error) {
 		return nil, err
 	}
 
+	app.runtimeReadyCheck = options.Runtime.Ready
 	app.Server = httpserver.New(httpserver.Options{
 		ServiceName:    cfg.App.ServiceName,
 		HTTP:           cfg.HTTP,
 		Logger:         logger,
 		Ready:          app.Ready,
 		MetricsHandler: app.Metrics.Handler(),
+		Handler:        options.Runtime.Handler,
 	})
-	app.runtimeReady.Store(app.Server.HasBusinessHandler())
-	if !app.runtimeReady.Load() {
+	app.runtimeRegistered.Store(app.Server.HasBusinessHandler() || options.Runtime.Ready != nil)
+	if !app.runtimeRegistered.Load() {
 		logger.Warn("service_runtime_not_registered", "service", cfg.App.ServiceName)
 	}
 
@@ -79,7 +99,11 @@ func New(ctx context.Context, serviceName string) (*App, error) {
 }
 
 func Run(ctx context.Context, serviceName string) error {
-	app, err := New(ctx, serviceName)
+	return RunWithOptions(ctx, Options{ServiceName: serviceName})
+}
+
+func RunWithOptions(ctx context.Context, options Options) error {
+	app, err := NewWithOptions(ctx, options)
 	if err != nil {
 		return err
 	}
@@ -105,7 +129,7 @@ func (a *App) Run(ctx context.Context) error {
 		return a.Close(context.Background())
 	case <-ctx.Done():
 		a.ready.Store(false)
-		a.runtimeReady.Store(false)
+		a.runtimeRegistered.Store(false)
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.Config.App.ShutdownTimeout)
 		defer cancel()
@@ -125,7 +149,7 @@ func (a *App) Ready(ctx context.Context) error {
 	if !a.ready.Load() {
 		return errors.New("app not ready")
 	}
-	if !a.runtimeReady.Load() {
+	if !a.runtimeRegistered.Load() {
 		return errors.New("service runtime not registered")
 	}
 
@@ -153,6 +177,11 @@ func (a *App) Ready(ctx context.Context) error {
 	}
 	if err := a.Storage.Validate(probeCtx); err != nil {
 		return fmt.Errorf("storage not ready: %w", err)
+	}
+	if a.runtimeReadyCheck != nil {
+		if err := a.runtimeReadyCheck(probeCtx, a); err != nil {
+			return fmt.Errorf("service runtime not ready: %w", err)
+		}
 	}
 
 	return nil
