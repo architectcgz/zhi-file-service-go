@@ -2,7 +2,6 @@ package queries
 
 import (
 	"context"
-	"strings"
 
 	"github.com/architectcgz/zhi-file-service-go/internal/services/admin/app/view"
 	"github.com/architectcgz/zhi-file-service-go/internal/services/admin/domain"
@@ -18,8 +17,8 @@ type ListFilesQuery struct {
 }
 
 type ListFilesConfig struct {
-	DefaultLimit int
-	MaxLimit     int
+	ListDefaultLimit int
+	ListMaxLimit     int
 }
 
 type ListFilesHandler struct {
@@ -29,17 +28,12 @@ type ListFilesHandler struct {
 }
 
 func NewListFilesHandler(files ports.AdminFileRepository, cfg ListFilesConfig) ListFilesHandler {
-	if cfg.DefaultLimit <= 0 {
-		cfg.DefaultLimit = 50
-	}
-	if cfg.MaxLimit <= 0 {
-		cfg.MaxLimit = 100
-	}
+	defaultLimit, maxLimit := normalizeListConfig(cfg.ListDefaultLimit, cfg.ListMaxLimit)
 
 	return ListFilesHandler{
 		files:        files,
-		defaultLimit: cfg.DefaultLimit,
-		maxLimit:     cfg.MaxLimit,
+		defaultLimit: defaultLimit,
+		maxLimit:     maxLimit,
 	}
 }
 
@@ -48,7 +42,18 @@ func (h ListFilesHandler) Handle(ctx context.Context, query ListFilesQuery) (vie
 		return view.AdminFileList{}, err
 	}
 
-	tenantID := strings.TrimSpace(query.TenantID)
+	tenantID, err := normalizeOptionalQueryValue(query.TenantID, "tenantId")
+	if err != nil {
+		return view.AdminFileList{}, err
+	}
+	status, err := normalizeFileStatus(query.Status)
+	if err != nil {
+		return view.AdminFileList{}, err
+	}
+	cursor, err := normalizeOptionalQueryValue(query.Cursor, "cursor")
+	if err != nil {
+		return view.AdminFileList{}, err
+	}
 	if tenantID != "" {
 		if err := domain.EnsureTenantScope(query.Auth, tenantID); err != nil {
 			return view.AdminFileList{}, err
@@ -58,8 +63,8 @@ func (h ListFilesHandler) Handle(ctx context.Context, query ListFilesQuery) (vie
 	items, nextCursor, err := h.files.List(ctx, ports.ListFilesQuery{
 		TenantID:     tenantID,
 		TenantScopes: scopedTenants(query.Auth),
-		Status:       strings.TrimSpace(query.Status),
-		Cursor:       query.Cursor,
+		Status:       status,
+		Cursor:       cursor,
 		Limit:        normalizeLimit(query.Limit, h.defaultLimit, h.maxLimit),
 	})
 	if err != nil {

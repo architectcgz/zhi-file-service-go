@@ -16,8 +16,8 @@ type ListTenantsQuery struct {
 }
 
 type ListTenantsConfig struct {
-	DefaultLimit int
-	MaxLimit     int
+	ListDefaultLimit int
+	ListMaxLimit     int
 }
 
 type ListTenantsHandler struct {
@@ -27,17 +27,12 @@ type ListTenantsHandler struct {
 }
 
 func NewListTenantsHandler(tenants ports.TenantRepository, cfg ListTenantsConfig) ListTenantsHandler {
-	if cfg.DefaultLimit <= 0 {
-		cfg.DefaultLimit = 50
-	}
-	if cfg.MaxLimit <= 0 {
-		cfg.MaxLimit = 100
-	}
+	defaultLimit, maxLimit := normalizeListConfig(cfg.ListDefaultLimit, cfg.ListMaxLimit)
 
 	return ListTenantsHandler{
 		tenants:      tenants,
-		defaultLimit: cfg.DefaultLimit,
-		maxLimit:     cfg.MaxLimit,
+		defaultLimit: defaultLimit,
+		maxLimit:     maxLimit,
 	}
 }
 
