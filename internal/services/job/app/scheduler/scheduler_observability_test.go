@@ -127,8 +127,10 @@ func TestRunOnceRecordsObservedJobFailure(t *testing.T) {
 		handle:   &stubLockHandle{key: "job:cleanup_multipart", owner: "node-a"},
 	}
 	worker := &stubWorker{
-		run: func(context.Context, jobs.Job) error {
-			return errors.New("cleanup failed")
+		result: jobs.Result{ItemsProcessed: 3, RetryCount: 1},
+		err:    errors.New("cleanup failed"),
+		run: func(context.Context, jobs.Job) (jobs.Result, error) {
+			return jobs.Result{ItemsProcessed: 3, RetryCount: 1}, errors.New("cleanup failed")
 		},
 	}
 	s := New(locker, worker)
@@ -150,6 +152,15 @@ func TestRunOnceRecordsObservedJobFailure(t *testing.T) {
 	jobHealth := health.Snapshot().Jobs[jobs.JobNameCleanupMultipart]
 	if jobHealth.Status != observability.StatusFailed || jobHealth.LastError != "cleanup failed" {
 		t.Fatalf("unexpected job health: %#v", jobHealth)
+	}
+	if jobHealth.ItemsProcessed != 3 || jobHealth.RetryCount != 1 {
+		t.Fatalf("job health result = %#v, want items=3 retry=1", jobHealth)
+	}
+	if metrics.counterValue("job_items_processed_total") != 3 {
+		t.Fatalf("job_items_processed_total = %d, want 3", metrics.counterValue("job_items_processed_total"))
+	}
+	if metrics.counterValue("job_retry_total") != 1 {
+		t.Fatalf("job_retry_total = %d, want 1", metrics.counterValue("job_retry_total"))
 	}
 }
 
