@@ -2,9 +2,9 @@
 
 ## Status
 
-- `pending`
+- `in_progress`
 
 ## Notes
 
-- 尚未开始实现
-- 开工前需要先修正文档中仍未对齐的分页配置键与 reason 强度表述
+- 已开始落第一批控制面授权骨架
+- 当前批次聚焦 `AdminContext`、角色矩阵、tenant scope、destructive reason guard 与基础 ports
