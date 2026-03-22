@@ -2,6 +2,7 @@ package jobs_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/architectcgz/zhi-file-service-go/internal/services/job/app/jobs"
@@ -49,12 +50,50 @@ func TestProcessOutboxEventsJobReturnsExecutionResult(t *testing.T) {
 	}
 }
 
+func TestProcessOutboxEventsJobReturnsZeroResultWhenNoEventsClaimed(t *testing.T) {
+	t.Parallel()
+
+	job := jobs.NewProcessOutboxEventsJob(&stubJobConsumer{})
+
+	result, err := jobs.Execute(context.Background(), job)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.ItemsProcessed != 0 || result.RetryCount != 0 {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestProcessOutboxEventsJobPropagatesConsumerErrorAndCounts(t *testing.T) {
+	t.Parallel()
+
+	job := jobs.NewProcessOutboxEventsJob(&stubJobConsumer{
+		result: outbox.Result{
+			Claimed: 2,
+			Failed:  2,
+		},
+		err: errors.New("consumer failed"),
+	})
+
+	result, err := jobs.Execute(context.Background(), job)
+	if err == nil || err.Error() != "consumer failed" {
+		t.Fatalf("Execute() error = %v, want %q", err, "consumer failed")
+	}
+	if result.ItemsProcessed != 2 {
+		t.Fatalf("ItemsProcessed = %d, want 2", result.ItemsProcessed)
+	}
+	if result.RetryCount != 2 {
+		t.Fatalf("RetryCount = %d, want 2", result.RetryCount)
+	}
+}
+
 type stubJobConsumer struct {
 	calls  int
 	result outbox.Result
+	err    error
 }
 
 func (s *stubJobConsumer) RunOnce(context.Context) (outbox.Result, error) {
 	s.calls++
-	return s.result, nil
+	return s.result, s.err
 }
