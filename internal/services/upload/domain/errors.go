@@ -3,13 +3,23 @@ package domain
 import "github.com/architectcgz/zhi-file-service-go/pkg/xerrors"
 
 const (
+	CodeUploadSessionNotFound             xerrors.Code = "UPLOAD_SESSION_NOT_FOUND"
 	CodeUploadModeInvalid                xerrors.Code = "UPLOAD_MODE_INVALID"
 	CodeUploadHashRequired               xerrors.Code = "UPLOAD_HASH_REQUIRED"
 	CodeUploadHashInvalid                xerrors.Code = "UPLOAD_HASH_INVALID"
 	CodeUploadHashUnsupported            xerrors.Code = "UPLOAD_HASH_UNSUPPORTED"
 	CodeUploadCompletionOwnershipInvalid xerrors.Code = "UPLOAD_COMPLETION_OWNERSHIP_INVALID"
 	CodeUploadSessionStateConflict       xerrors.Code = "UPLOAD_SESSION_STATE_CONFLICT"
+	CodeTenantQuotaExceeded              xerrors.Code = "TENANT_QUOTA_EXCEEDED"
+	CodeMimeTypeNotAllowed               xerrors.Code = "MIME_TYPE_NOT_ALLOWED"
 )
+
+func ErrUploadSessionNotFound(uploadSessionID string) error {
+	return xerrors.New(CodeUploadSessionNotFound, "upload session not found", xerrors.Details{
+		"resourceType": "uploadSession",
+		"resourceId":   uploadSessionID,
+	})
+}
 
 func errUploadModeInvalid(current SessionMode) error {
 	return xerrors.New(CodeUploadModeInvalid, "upload mode is invalid", xerrors.Details{
