@@ -178,6 +178,74 @@ func TestCompleteUploadSessionPresignedSingleUsesVerifiedHash(t *testing.T) {
 	}
 }
 
+func TestCompleteUploadSessionFallsBackToStreamingHashWhenChecksumMissing(t *testing.T) {
+	now := time.Date(2026, 3, 22, 18, 15, 0, 0, time.UTC)
+	session := mustNewSession(t, domain.CreateSessionParams{
+		ID:          "upload-single-hash-fallback-1",
+		TenantID:    "tenant-a",
+		OwnerID:     "user-1",
+		FileName:    "avatar.png",
+		ContentType: "image/png",
+		SizeBytes:   9,
+		AccessLevel: storage.AccessLevelPublic,
+		Mode:        domain.SessionModePresignedSingle,
+		Object: storage.ObjectRef{
+			Provider:   storage.ProviderS3,
+			BucketName: "public-bucket",
+			ObjectKey:  "tenant-a/uploads/upload-single-hash-fallback-1/avatar.png",
+		},
+		Hash:      &domain.ContentHash{Algorithm: "SHA256", Value: validHash()},
+		CreatedAt: now.Add(-2 * time.Minute),
+		UpdatedAt: now.Add(-time.Minute),
+		ExpiresAt: now.Add(28 * time.Minute),
+	})
+
+	reader := &stubObjectReader{
+		metadata: storage.ObjectMetadata{
+			SizeBytes:   9,
+			ContentType: "image/png",
+			ETag:        `"etag-single-fallback"`,
+		},
+		computedHash: validHash(),
+	}
+	handler := commands.NewCompleteUploadSessionHandler(
+		&stubCompleteSessionRepository{
+			session: session,
+			acquired: &ports.CompletionAcquireResult{
+				Session:   session,
+				Ownership: domain.CompletionOwnershipAcquired,
+			},
+			confirmed: session,
+		},
+		&stubSessionPartRepository{},
+		&stubBlobRepository{},
+		&stubFileRepository{},
+		&stubCompleteDedupRepository{},
+		&stubTenantUsageRepository{},
+		&stubUploadOutboxPublisher{},
+		&stubUploadTxManager{},
+		&stubCompleteMultipartManager{},
+		reader,
+		&stubSequenceIDGenerator{ids: []string{"blob-single-fallback-1", "file-single-fallback-1"}},
+		clock.NewFixed(now),
+	)
+
+	result, err := handler.Handle(context.Background(), commands.CompleteUploadSessionCommand{
+		UploadSessionID: "upload-single-hash-fallback-1",
+		IdempotencyKey:  "complete-single-fallback-1",
+		Auth:            newUploadAuth(),
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if result.FileID != "file-single-fallback-1" {
+		t.Fatalf("file id = %q, want %q", result.FileID, "file-single-fallback-1")
+	}
+	if reader.computeCalls != 1 {
+		t.Fatalf("compute calls = %d, want 1", reader.computeCalls)
+	}
+}
+
 func TestCompleteUploadSessionDirectCompletesMultipartAndPersistsParts(t *testing.T) {
 	now := time.Date(2026, 3, 22, 18, 20, 0, 0, time.UTC)
 	session := mustNewSession(t, domain.CreateSessionParams{
@@ -864,12 +932,20 @@ func (s *stubUploadTxManager) WithinTransaction(ctx context.Context, fn func(con
 var _ uploadtx.Manager = (*stubUploadTxManager)(nil)
 
 type stubObjectReader struct {
-	metadata storage.ObjectMetadata
-	err      error
+	metadata     storage.ObjectMetadata
+	err          error
+	computedHash string
+	computeErr   error
+	computeCalls int
 }
 
 func (s *stubObjectReader) HeadObject(context.Context, storage.ObjectRef) (storage.ObjectMetadata, error) {
 	return s.metadata, s.err
+}
+
+func (s *stubObjectReader) ComputeSHA256(context.Context, storage.ObjectRef) (string, error) {
+	s.computeCalls++
+	return s.computedHash, s.computeErr
 }
 
 type stubCompleteMultipartManager struct {

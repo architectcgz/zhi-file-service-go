@@ -51,6 +51,10 @@ type materializedUpload struct {
 	dedupDecision *domain.DedupDecision
 }
 
+type objectSHA256Reader interface {
+	ComputeSHA256(context.Context, pkgstorage.ObjectRef) (string, error)
+}
+
 type uploadSessionCompletedPayload struct {
 	OccurredAt    time.Time `json:"occurredAt"`
 	RequestID     string    `json:"requestId,omitempty"`
@@ -242,6 +246,15 @@ func (h CompleteUploadSessionHandler) materialize(ctx context.Context, session *
 	metadata, err := h.reader.HeadObject(ctx, session.Object)
 	if err != nil {
 		return materializedUpload{}, xerrors.Wrap(xerrors.CodeServiceUnavailable, "head uploaded object", err, nil)
+	}
+	if strings.TrimSpace(metadata.Checksum) == "" && expectedHash != nil {
+		if reader, ok := h.reader.(objectSHA256Reader); ok {
+			checksum, err := reader.ComputeSHA256(ctx, session.Object)
+			if err != nil {
+				return materializedUpload{}, xerrors.Wrap(xerrors.CodeServiceUnavailable, "compute uploaded object hash", err, nil)
+			}
+			metadata.Checksum = checksum
+		}
 	}
 
 	canonicalHash, err := resolveCanonicalHash(expectedHash, metadata.Checksum)

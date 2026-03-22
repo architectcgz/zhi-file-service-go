@@ -17,6 +17,8 @@ CREATE TABLE upload.upload_sessions (
   total_parts INTEGER NOT NULL DEFAULT 1,
   completed_parts INTEGER NOT NULL DEFAULT 0,
   file_id VARCHAR(26),
+  completion_token VARCHAR(128),
+  completion_started_at TIMESTAMPTZ,
   status VARCHAR(16) NOT NULL,
   failure_code VARCHAR(64),
   failure_message VARCHAR(500),
