@@ -31,6 +31,7 @@ type CompletionAcquireResult struct {
 
 type SessionRepository interface {
 	Create(ctx context.Context, session *domain.Session) error
+	Save(ctx context.Context, session *domain.Session) error
 	GetByID(ctx context.Context, tenantID string, uploadSessionID string) (*domain.Session, error)
 	FindReusable(ctx context.Context, query ReusableSessionQuery) (*domain.Session, error)
 	AcquireCompletion(ctx context.Context, request CompletionAcquireRequest) (*CompletionAcquireResult, error)

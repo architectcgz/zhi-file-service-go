@@ -163,6 +163,11 @@ func (s *stubQuerySessionRepository) Create(context.Context, *domain.Session) er
 	panic("unexpected call")
 }
 
+func (s *stubQuerySessionRepository) Save(context.Context, *domain.Session) error {
+	s.session = s.session
+	return nil
+}
+
 func (s *stubQuerySessionRepository) GetByID(_ context.Context, _ string, _ string) (*domain.Session, error) {
 	return s.session, s.err
 }

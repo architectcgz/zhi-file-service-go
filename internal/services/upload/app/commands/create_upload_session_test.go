@@ -383,6 +383,8 @@ func TestCreateUploadSessionReturnsReusableSession(t *testing.T) {
 type stubSessionRepository struct {
 	created       *domain.Session
 	createErr     error
+	saved         *domain.Session
+	saveErr       error
 	reusable      *domain.Session
 	reusableErr   error
 	reusableQuery ports.ReusableSessionQuery
@@ -391,6 +393,11 @@ type stubSessionRepository struct {
 func (s *stubSessionRepository) Create(_ context.Context, session *domain.Session) error {
 	s.created = session
 	return s.createErr
+}
+
+func (s *stubSessionRepository) Save(_ context.Context, session *domain.Session) error {
+	s.saved = session
+	return s.saveErr
 }
 
 func (s *stubSessionRepository) GetByID(context.Context, string, string) (*domain.Session, error) {
@@ -462,13 +469,16 @@ func (s *stubMultipartManager) AbortMultipartUpload(context.Context, storage.Obj
 }
 
 type stubPresignManager struct {
-	url      string
-	headers  map[string]string
-	err      error
-	calls    int
-	lastRef  storage.ObjectRef
-	lastType string
-	lastTTL  time.Duration
+	url             string
+	headers         map[string]string
+	err             error
+	calls           int
+	uploadPartCalls int
+	lastRef         storage.ObjectRef
+	lastUploadID    string
+	lastPartNumber  int
+	lastType        string
+	lastTTL         time.Duration
 }
 
 func (s *stubPresignManager) PresignPutObject(_ context.Context, ref storage.ObjectRef, contentType string, ttl time.Duration) (string, map[string]string, error) {
@@ -479,8 +489,13 @@ func (s *stubPresignManager) PresignPutObject(_ context.Context, ref storage.Obj
 	return s.url, s.headers, s.err
 }
 
-func (s *stubPresignManager) PresignUploadPart(context.Context, storage.ObjectRef, string, int, time.Duration) (string, map[string]string, error) {
-	panic("unexpected call")
+func (s *stubPresignManager) PresignUploadPart(_ context.Context, ref storage.ObjectRef, uploadID string, partNumber int, ttl time.Duration) (string, map[string]string, error) {
+	s.uploadPartCalls++
+	s.lastRef = ref
+	s.lastUploadID = uploadID
+	s.lastPartNumber = partNumber
+	s.lastTTL = ttl
+	return s.url, s.headers, s.err
 }
 
 type stubIDGenerator struct {

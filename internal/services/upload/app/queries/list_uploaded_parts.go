@@ -86,6 +86,14 @@ func (h ListUploadedPartsHandler) Handle(ctx context.Context, query ListUploaded
 	if err := h.parts.Replace(ctx, session.TenantID, session.ID, records); err != nil {
 		return ListUploadedPartsResult{}, err
 	}
+	if len(providerParts) > 0 {
+		if err := session.MarkUploading(len(providerParts)); err == nil {
+			session.UpdatedAt = now
+			if err := h.sessions.Save(ctx, session); err != nil {
+				return ListUploadedPartsResult{}, err
+			}
+		}
+	}
 
 	return ListUploadedPartsResult{Parts: mapUploadedParts(providerParts)}, nil
 }

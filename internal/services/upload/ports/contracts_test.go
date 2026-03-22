@@ -84,6 +84,10 @@ func (stubSessionRepository) Create(context.Context, *domain.Session) error {
 	return nil
 }
 
+func (stubSessionRepository) Save(context.Context, *domain.Session) error {
+	return nil
+}
+
 func (stubSessionRepository) GetByID(context.Context, string, string) (*domain.Session, error) {
 	return nil, nil
 }
