@@ -23,7 +23,7 @@
 
 ### 2.1 核心目标
 
-- 在保持现有外部 API 兼容的前提下，重构为更清晰的多服务架构
+- 以一套新的统一 API 契约为边界，重构为更清晰的多服务架构
 - 提升上传和访问链路的吞吐能力，优先优化数据面
 - 提升系统可维护性，使领域边界、代码边界、部署边界一致
 - 提升云原生适配能力，支持独立扩缩容、故障隔离和阶段化落地
@@ -33,7 +33,7 @@
 1. 性能与吞吐
 2. 可维护性
 3. 云原生伸缩与稳定性
-4. 全量兼容现有功能和接口语义
+4. 统一新的外部 API 契约并沉淀 OpenAPI
 
 ### 2.3 非目标
 
@@ -55,9 +55,9 @@
 
 对象存储适配、元数据访问、租户策略、鉴权规则更适合作为共享模块存在，而不是第一天就拆成独立网络服务。
 
-### 3.4 兼容优先，内部可重构
+### 3.4 外部协议统一，内部可重构
 
-外部 API 路径、请求头、错误码语义尽量保持兼容。内部模型、表结构和服务拆分可以按 Go 版目标重新设计，不以旧实现为边界。
+Go 版定义新的 canonical API，并要求后续调用方统一切换。内部模型、表结构和服务拆分可以围绕这套新 API 重新设计，不以旧实现为边界。
 
 ### 3.5 云原生友好
 
@@ -165,6 +165,11 @@ PostgreSQL 访问是强事务边界的一部分。若第一阶段强行通过 RP
 
 ```text
 zhi-file-service-go/
+  .planning/
+    platform/
+      task_plan.md
+      findings.md
+      progress.md
   cmd/
     upload-service/
     access-service/
@@ -337,7 +342,7 @@ zhi-file-service-go/
 
 ## 6. 数据模型设计
 
-Go 版应尽量兼容现有核心数据语义，但允许做结构升级。
+Go 版保留必要业务语义，但不受旧表结构和旧接口形态约束，可以按新架构直接升级。
 
 ### 6.1 核心表
 
@@ -384,46 +389,51 @@ Go 版应尽量兼容现有核心数据语义，但允许做结构升级。
 
 管理员 API、租户变更、人工删除文件等操作建议独立审计，避免在主表中混杂行为日志。
 
-## 7. API 兼容策略
+## 7. API 设计策略
 
-本项目目标是全量兼容，不是重新发明一套外部协议。
+本项目目标是定义并收敛到一套新的外部协议，而不是继续背负 legacy 路径。
 
-### 7.1 兼容范围
+### 7.1 新 API 前缀
 
-以下内容默认保持兼容：
+推荐分为两组前缀：
 
-- API 路径
-- `X-App-Id` 请求头语义
-- 主要请求 / 响应结构
-- 主要错误码语义
-- 管理员 API Key 认证模式
-- 文件访问跳转语义
+- 数据面：`/api/v1`
+- 控制面：`/api/admin/v1`
 
-### 7.2 兼容原则
+这样可以天然分离：
 
-#### 原路径兼容
+- 上传与访问流量
+- 后台治理与审计流量
+- 网关限流与鉴权策略
 
-保留现有主要入口：
+### 7.2 资源收敛原则
 
-- `/api/v1/upload/*`
-- `/api/v1/multipart/*`
-- `/api/v1/direct-upload/*`
-- `/api/v1/upload-sessions*`
-- `/api/v1/files/*`
-- `/api/v1/admin/*`
+新的 north-south API 收敛到以下核心资源：
 
-#### 内部统一，外部兼容
+- `upload-sessions`
+- `files`
+- `access-tickets`
+- `tenants`
 
-外部可以保留多套 legacy API，但内部统一映射到同一套 UploadSession / FileAccess / TenantPolicy 模型。
+其中上传统一围绕 `UploadSession` 展开，不再分别维护：
 
-#### 错误码兼容
+- `upload`
+- `direct-upload`
+- `multipart`
 
-保持当前双层错误表达：
+多套并列的历史入口。
 
-- HTTP status
-- `errorCode`
+### 7.3 契约统一原则
 
-这样可以降低客户端改造成本。
+统一约束：
+
+- 统一版本前缀
+- 统一错误结构
+- 统一分页模型
+- 统一幂等语义
+- 统一 OpenAPI 输出方式
+
+具体字段级规范以 [api-design-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/api-design-spec.md) 为基线，并最终落到 `api/openapi/*.yaml`。
 
 ## 8. 关键链路设计
 
@@ -475,6 +485,8 @@ Go 版应尽量兼容现有核心数据语义，但允许做结构升级。
 - access-service 默认无状态
 - 不读取大对象内容
 - 重点优化鉴权、票据和跳转
+- 除 `access-ticket redirect` 外，数据面 API 仍统一要求 Bearer Token
+- `PUBLIC` 文件的匿名访问只发生在最终 public URL 或 `access-ticket redirect` 落点
 
 ### 8.3 管理员链路
 
@@ -595,8 +607,9 @@ Redis 建议只承担以下职责：
 
 每个服务都应具备：
 
-- readiness probe
-- liveness probe
+- `GET /ready` readiness probe
+- `GET /live` liveness probe
+- `GET /metrics` metrics 暴露入口
 - graceful shutdown
 - config hot reload 或滚动更新
 - connection pool 上限
@@ -644,8 +657,8 @@ Redis 建议只承担以下职责：
 
 ### 13.1 身份与鉴权
 
-- 用户请求保留现有身份头或 JWT 解析逻辑
-- 管理员链路单独使用 API Key 或内部 SSO
+- 数据面统一使用 Bearer Token 或经可信网关标准化后的身份上下文
+- 管理员链路统一使用后台身份体系，例如内部 SSO 或管理员专用 Bearer 凭证
 - 服务间调用使用 mTLS 或内部签名
 
 ### 13.2 数据安全
@@ -678,31 +691,37 @@ Redis 建议只承担以下职责：
 - 更容易先打通 Go 服务基础设施基线
 - 能最早验证鉴权、日志、metrics、配置、部署模板
 
-#### Phase 2: 实现 upload-service 的 upload-session 与 direct-upload 能力
+#### Phase 2: 实现 upload-service 的会话创建、代理上传与 complete 能力
 
 优先实现：
 
-- `/api/v1/upload-sessions*`
-- `/api/v1/direct-upload/*`
+- `POST /api/v1/upload-sessions`
+- `GET /api/v1/upload-sessions/{uploadSessionId}`
+- `PUT /api/v1/upload-sessions/{uploadSessionId}/content`
+- `POST /api/v1/upload-sessions/{uploadSessionId}/complete`
 
 原因：
 
-- 这两类路径最符合新架构方向
+- 这些入口最符合新的会话化 API 设计
 - 状态机和对象存储抽象最容易先沉淀为 canonical 模型
 
-#### Phase 3: 实现 proxy upload 与 multipart 代理上传
+#### Phase 3: 实现 presigned single 与 multipart 直传能力
 
 补齐：
 
-- `/api/v1/upload/*`
-- `/api/v1/multipart/*`
+- `POST /api/v1/upload-sessions/{uploadSessionId}/parts/presign`
+- `GET /api/v1/upload-sessions/{uploadSessionId}/parts`
+- `POST /api/v1/upload-sessions/{uploadSessionId}/abort`
+- `POST /api/v1/files/{fileId}/access-tickets`
+- `GET /api/v1/files/{fileId}/download`
 
 #### Phase 4: 实现 admin-service 与 job-service
 
 最后补齐：
 
-- tenant admin
-- file admin
+- `/api/admin/v1/tenants*`
+- `/api/admin/v1/files*`
+- `/api/admin/v1/audit-logs`
 - cleanup jobs
 
 ### 14.3 开发要求
@@ -740,11 +759,11 @@ Redis 建议只承担以下职责：
 
 | 级别 | 风险 | 说明 | 缓解措施 |
 |------|------|------|----------|
-| 高 | API 兼容性回归 | Go 重写后细节偏差会直接影响客户端 | 先做契约冻结和 golden tests |
+| 高 | API 契约漂移 | 多服务并行开发时容易出现风格和字段语义分裂 | 先冻结 API 设计并维护 OpenAPI |
 | 高 | multipart 状态机不完整 | complete / abort / resume 容易出一致性问题 | 明确状态机与幂等规则 |
 | 高 | 过度拆服务导致热路径变慢 | 服务边界过细会让上传和访问多跳 | 第一阶段控制为 4 个服务 |
-| 中 | 契约兼容遗漏 | Go 重写后请求、响应、错误细节可能偏离旧客户端预期 | 用兼容矩阵和 golden tests 约束 |
-| 中 | 管理后台与租户治理规则遗漏 | 控制面流量低但规则多 | 单独补兼容矩阵与管理用例 |
+| 中 | 新 API 范围失控 | 路径设计不克制会重新长出多套入口 | 用资源模型和路径规范约束 |
+| 中 | 管理后台与租户治理规则遗漏 | 控制面流量低但规则多 | 单独补 admin API 与治理用例 |
 | 中 | 云原生配置复杂度 | 多服务后配置项和部署模板增多 | 建立统一部署基线与模板 |
 
 ## 17. 最终建议
@@ -753,8 +772,8 @@ Redis 建议只承担以下职责：
 
 - 仓库形态：单仓库 monorepo
 - 架构形态：共享底层模块 + 4 个核心服务
-- 第一阶段重点：先迁访问链路，再迁 upload-sessions / direct-upload
-- 技术路线：兼容现有 API，内部统一为 UploadSession / FileAccess / TenantPolicy 三大核心模型
+- 第一阶段重点：先落访问链路，再落 upload-sessions 与 presigned 上传主链路
+- 技术路线：以新 API 契约统一 UploadSession / FileAccess / TenantPolicy 三大核心模型
 
 这是一个兼顾性能、可维护性和云原生稳定性的最小可行升级方案。
 
@@ -763,12 +782,12 @@ Redis 建议只承担以下职责：
 1. 只换语言，不换架构
 2. 一上来过度微服务化，导致热路径变慢、系统更脆
 
-## 18. 后续建议文档
+## 18. 文档与计划入口
 
-建议下一批文档按以下顺序补齐：
+当前这批核心设计文档已经补齐。
 
-1. API 兼容矩阵
-2. 核心数据表设计
-3. UploadSession 状态机设计
-4. multipart 一致性与幂等设计
-5. 对象存储抽象设计
+后续维护约束固定为：
+
+1. 设计与契约文档统一从 `docs/README.md` 进入
+2. 实施计划统一维护在仓库根目录 `.planning/`
+3. 不再维护“后续再补”的占位型文档列表

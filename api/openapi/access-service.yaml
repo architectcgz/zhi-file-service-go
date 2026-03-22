@@ -1,0 +1,546 @@
+openapi: 3.0.3
+info:
+  title: zhi-file-access-service API
+  version: 1.0.0
+  description: |
+    zhi-file-service-go 访问服务正式 OpenAPI 契约。
+    该服务负责文件元信息读取、访问票据签发和下载跳转。
+servers:
+  - url: /
+    description: 相对网关根路径
+tags:
+  - name: Files
+    description: 文件读取与下载授权
+  - name: AccessTickets
+    description: 访问票据与基于票据的跳转
+security:
+  - BearerAuth: []
+paths:
+  /api/v1/files/{fileId}:
+    get:
+      tags:
+        - Files
+      summary: 获取文件详情
+      description: |
+        返回访问链路所需的最小文件视图。
+        热路径读取应直接来自 `file_assets` 投影，不依赖跨服务 RPC，
+        也不应为了读取详情而回查对象存储。
+        即便文件的 `accessLevel=PUBLIC`，该 north-south API 仍要求 Bearer Token；
+        匿名访问只发生在最终 public URL 或 ticket redirect 落点。
+      operationId: getFile
+      x-error-codes:
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - FILE_NOT_FOUND
+        - FILE_ACCESS_DENIED
+        - TENANT_SCOPE_DENIED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/FileId'
+      responses:
+        '200':
+          description: 文件详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileResponse'
+              examples:
+                privateFile:
+                  summary: 私有文件详情
+                  value:
+                    requestId: 01JPACXDEHMGYNY4VAVW7H1MK4
+                    data:
+                      fileId: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+                      tenantId: demo
+                      fileName: invoice-2026-03.pdf
+                      contentType: application/pdf
+                      sizeBytes: 524288
+                      accessLevel: PRIVATE
+                      status: ACTIVE
+                      createdAt: '2026-03-21T10:00:00Z'
+                      updatedAt: '2026-03-21T10:00:03Z'
+                publicFile:
+                  summary: 公有文件详情
+                  value:
+                    requestId: 01JPACXDEHMGYNY4VAVW7H1MK4
+                    data:
+                      fileId: 01JPACWQ6A9Y0MST6FZFSGC4Y2
+                      tenantId: demo
+                      fileName: avatar.png
+                      contentType: image/png
+                      sizeBytes: 182044
+                      accessLevel: PUBLIC
+                      status: ACTIVE
+                      downloadUrl: https://cdn.example.com/public/demo/avatar.png
+                      createdAt: '2026-03-21T10:00:00Z'
+                      updatedAt: '2026-03-21T10:00:03Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/files/{fileId}/access-tickets:
+    post:
+      tags:
+        - Files
+      summary: 创建访问票据
+      description: |
+        为指定文件签发短时访问票据。
+        第一阶段默认采用无状态签名票据，不为每张票据持久化数据库记录。
+        若调用方重复提交相同幂等键，应返回与首次成功语义一致的结果。
+      operationId: createAccessTicket
+      x-error-codes:
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - FILE_NOT_FOUND
+        - FILE_ACCESS_DENIED
+        - DOWNLOAD_NOT_ALLOWED
+        - TENANT_SCOPE_DENIED
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/FileId'
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccessTicketRequest'
+            examples:
+              attachmentDownload:
+                summary: 附件下载票据
+                value:
+                  expiresInSeconds: 300
+                  responseDisposition: attachment
+                  responseFileName: invoice-2026-03.pdf
+              inlinePreview:
+                summary: 在线预览票据
+                value:
+                  expiresInSeconds: 120
+                  responseDisposition: inline
+      responses:
+        '201':
+          description: 访问票据已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessTicketResponse'
+              examples:
+                ticketCreated:
+                  summary: 票据签发成功
+                  value:
+                    requestId: 01JPACYQJW8TRVQF1F6N1WYJ16
+                    data:
+                      ticket: at_01JPACYY3AS4K8Z9YV5SXVJ2QX
+                      redirectUrl: /api/v1/access-tickets/at_01JPACYY3AS4K8Z9YV5SXVJ2QX/redirect
+                      expiresAt: '2026-03-21T10:05:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/files/{fileId}/download:
+    get:
+      tags:
+        - Files
+      summary: 下载文件
+      description: |
+        浏览器友好的下载入口。
+        该接口默认返回 `302 Found`，并在 `Location` header 中给出最终下载地址。
+
+        对 public 文件，`Location` 可以是 CDN 或 public bucket URL。
+        对 private 文件，`Location` 应为短时 presigned GET URL。
+        即便文件为 public，该 API 本身仍要求 Bearer Token。
+      operationId: downloadFile
+      x-error-codes:
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - FILE_NOT_FOUND
+        - FILE_ACCESS_DENIED
+        - DOWNLOAD_NOT_ALLOWED
+        - TENANT_SCOPE_DENIED
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/FileId'
+        - $ref: '#/components/parameters/DownloadDisposition'
+      responses:
+        '302':
+          $ref: '#/components/responses/RedirectFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/access-tickets/{ticket}/redirect:
+    get:
+      tags:
+        - AccessTickets
+      summary: 使用访问票据完成跳转
+      description: |
+        使用 access ticket 完成最终下载跳转。
+        该接口不要求 Bearer Token，因为 ticket 本身就是短时访问凭证。
+        即使有票据，也不能绕过文件状态检查和过期校验。
+      operationId: redirectByAccessTicket
+      security: []
+      x-error-codes:
+        - ACCESS_TICKET_INVALID
+        - ACCESS_TICKET_EXPIRED
+        - FILE_NOT_FOUND
+        - FILE_ACCESS_DENIED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/AccessTicket'
+      responses:
+        '302':
+          $ref: '#/components/responses/RedirectFound'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 数据面 Bearer Token，tenant 与主体语义以 AuthContext 契约为准。
+  parameters:
+    FileId:
+      name: fileId
+      in: path
+      required: true
+      description: 文件 ID，推荐使用 ULID。
+      schema:
+        type: string
+        minLength: 26
+      example: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+    AccessTicket:
+      name: ticket
+      in: path
+      required: true
+      description: 短时访问票据。
+      schema:
+        type: string
+        minLength: 1
+      example: at_01JPACYY3AS4K8Z9YV5SXVJ2QX
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: 创建访问票据时的幂等键。
+      schema:
+        type: string
+        maxLength: 128
+      example: access-ticket-01JPACWQ6A9Y0MST6FZFSGC4Y1
+    XRequestIdHeader:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: 调用方自定义请求 ID。
+      schema:
+        type: string
+        maxLength: 128
+      example: req-01JPACXDEHMGYNY4VAVW7H1MK4
+    DownloadDisposition:
+      name: disposition
+      in: query
+      required: false
+      description: 下载呈现方式。未传则由服务按默认策略决定。
+      schema:
+        type: string
+        enum:
+          - inline
+          - attachment
+      example: attachment
+  responses:
+    RedirectFound:
+      description: 成功重定向到实际下载地址
+      headers:
+        Location:
+          required: true
+          description: 最终下载地址，通常为 public URL 或 presigned GET URL。
+          schema:
+            type: string
+            format: uri
+            example: https://storage.example.com/private-bucket/demo/invoice-2026-03.pdf?X-Amz-Signature=abc
+    Unauthorized:
+      description: 未认证或 token 无效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPAD0QX8D5MPMMH6V0B8A70B
+            error:
+              code: UNAUTHORIZED
+              message: bearer token is missing or invalid
+              details: {}
+    Forbidden:
+      description: 已认证但无权访问
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            fileAccessDenied:
+              summary: 文件不可访问
+              value:
+                requestId: 01JPAD13BSHDH6NQXQY0JBDF7D
+                error:
+                  code: FILE_ACCESS_DENIED
+                  message: current subject cannot access this file
+                  details:
+                    resourceType: file
+                    resourceId: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+            downloadNotAllowed:
+              summary: 当前策略不允许下载
+              value:
+                requestId: 01JPAD13BSHDH6NQXQY0JBDF7D
+                error:
+                  code: DOWNLOAD_NOT_ALLOWED
+                  message: file download is not allowed by current policy
+                  details:
+                    resourceType: file
+                    resourceId: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+    NotFound:
+      description: 文件或票据不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            fileNotFound:
+              summary: 文件不存在
+              value:
+                requestId: 01JPAD1P0M6ZN3K2VTQX1VT7M3
+                error:
+                  code: FILE_NOT_FOUND
+                  message: file not found
+                  details:
+                    resourceType: file
+                    resourceId: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+            accessTicketExpired:
+              summary: 票据已过期
+              value:
+                requestId: 01JPAD1P0M6ZN3K2VTQX1VT7M3
+                error:
+                  code: ACCESS_TICKET_EXPIRED
+                  message: access ticket expired
+                  details:
+                    resourceType: accessTicket
+                    resourceId: at_01JPACYY3AS4K8Z9YV5SXVJ2QX
+    TooManyRequests:
+      description: 触发限流
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPAD20CNZ5G7RXG2Q07A9Q3S
+            error:
+              code: RATE_LIMITED
+              message: request rate exceeded current limit
+              details:
+                retryAfterSeconds: 30
+    InternalError:
+      description: 服务内部错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPAD25JW3JTBW2YDZBKRJ33Y
+            error:
+              code: INTERNAL_ERROR
+              message: internal server error
+              details: {}
+    ServiceUnavailable:
+      description: 关键依赖不可用
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPAD2B8EA2D9ZY90V1XBKFNS
+            error:
+              code: SERVICE_UNAVAILABLE
+              message: storage dependency is temporarily unavailable
+              details: {}
+  schemas:
+    AccessLevel:
+      type: string
+      enum:
+        - PUBLIC
+        - PRIVATE
+      example: PRIVATE
+    FileStatus:
+      type: string
+      enum:
+        - ACTIVE
+        - DELETED
+      example: ACTIVE
+    File:
+      type: object
+      required:
+        - fileId
+        - tenantId
+        - fileName
+        - contentType
+        - sizeBytes
+        - accessLevel
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        fileId:
+          type: string
+          example: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+        tenantId:
+          type: string
+          example: demo
+        fileName:
+          type: string
+          example: invoice-2026-03.pdf
+        contentType:
+          type: string
+          example: application/pdf
+        sizeBytes:
+          type: integer
+          format: int64
+          example: 524288
+        accessLevel:
+          $ref: '#/components/schemas/AccessLevel'
+        status:
+          $ref: '#/components/schemas/FileStatus'
+        downloadUrl:
+          type: string
+          format: uri
+          description: 仅在 public 文件或可直接返回 URL 的场景下出现。
+          example: https://cdn.example.com/public/demo/avatar.png
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:00:00Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:00:03Z'
+    CreateAccessTicketRequest:
+      type: object
+      properties:
+        expiresInSeconds:
+          type: integer
+          minimum: 1
+          maximum: 3600
+          description: 票据有效时间。未传则使用服务默认 TTL。
+          example: 300
+        responseDisposition:
+          type: string
+          enum:
+            - inline
+            - attachment
+          description: 下载呈现方式。
+          example: attachment
+        responseFileName:
+          type: string
+          description: 作为附件下载时建议使用的文件名。
+          example: invoice-2026-03.pdf
+    AccessTicketData:
+      type: object
+      required:
+        - ticket
+        - expiresAt
+      properties:
+        ticket:
+          type: string
+          example: at_01JPACYY3AS4K8Z9YV5SXVJ2QX
+        redirectUrl:
+          type: string
+          description: 通过票据完成下载跳转的相对或绝对地址。
+          example: /api/v1/access-tickets/at_01JPACYY3AS4K8Z9YV5SXVJ2QX/redirect
+        expiresAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:05:00Z'
+    FileResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPACXDEHMGYNY4VAVW7H1MK4
+        data:
+          $ref: '#/components/schemas/File'
+    AccessTicketResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPACYQJW8TRVQF1F6N1WYJ16
+        data:
+          $ref: '#/components/schemas/AccessTicketData'
+    ErrorDetail:
+      type: object
+      additionalProperties: true
+      description: 结构化错误详情，字段规范以错误码注册表为准。
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: FILE_NOT_FOUND
+        message:
+          type: string
+          example: file not found
+        details:
+          $ref: '#/components/schemas/ErrorDetail'
+    ErrorResponse:
+      type: object
+      required:
+        - requestId
+        - error
+      properties:
+        requestId:
+          type: string
+          example: 01JPAD1P0M6ZN3K2VTQX1VT7M3
+        error:
+          $ref: '#/components/schemas/Error'

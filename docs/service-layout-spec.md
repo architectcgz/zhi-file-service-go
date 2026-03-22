@@ -61,6 +61,14 @@
 
 ```text
 zhi-file-service-go/
+  Makefile
+  .env.example
+  .planning/
+    platform/
+      task_plan.md
+      findings.md
+      progress.md
+
   cmd/
     upload-service/
       main.go
@@ -124,9 +132,22 @@ zhi-file-service-go/
     audit/
     infra/
 
+  bootstrap/
+    seed/
+      dev/
+      test/
+
+  scripts/
+    bootstrap/
+    dev/
+    test/
+    tools/
+
   test/
     integration/
+    contract/
     e2e/
+    performance/
     fixtures/
 
   deployments/
@@ -236,9 +257,57 @@ cmd/access-service/main.go
 放这里的内容：
 
 - 集成测试
+- 契约测试
 - E2E 测试
 - 压测脚本
 - 公共 fixture
+
+## 4.8 `bootstrap/`
+
+用途：
+
+- 放 seed 数据和环境初始化所需静态样本
+
+放这里的内容：
+
+- `seed/dev`
+- `seed/test`
+
+不要放：
+
+- 运行时配置 Secret
+- 需要人工维护的大量脏数据
+
+## 4.9 `scripts/`
+
+用途：
+
+- 放 `Makefile` 背后的底层执行脚本
+
+放这里的内容：
+
+- bootstrap 脚本
+- 本地运行脚本
+- 测试编排脚本
+- 工具校验脚本
+
+原则：
+
+- `Makefile` 是统一入口
+- `scripts/` 承载实现细节
+- 不把业务逻辑写进脚本
+
+## 4.10 `.planning/`
+
+用途：
+
+- 放模块级实施计划、review 发现和阶段进度
+
+固定约束：
+
+- 只允许按模块建目录，例如 `.planning/platform/`、`.planning/upload-service/`
+- 每个目录固定使用 `task_plan.md`、`findings.md`、`progress.md`
+- 不把实施计划散落到 `docs/`、仓库根目录或临时草稿文件
 
 ## 5. 服务内部结构模板
 
@@ -572,13 +641,32 @@ test/integration/upload_service_complete_test.go
 test/integration/access_service_presign_test.go
 ```
 
-## 10.3 E2E 测试
+## 10.3 契约测试
+
+规则：
+
+- 基于 OpenAPI 的 HTTP 契约测试放 `test/contract`
+
+示例：
+
+```text
+test/contract/upload_create_session_contract_test.go
+test/contract/admin_delete_file_contract_test.go
+```
+
+## 10.4 E2E 测试
 
 规则：
 
 - 跨服务、带真实 HTTP 的测试放 `test/e2e`
 
-## 10.4 fixture
+## 10.5 压测
+
+规则：
+
+- 压测脚本和场景定义放 `test/performance`
+
+## 10.6 fixture
 
 规则：
 
@@ -635,6 +723,11 @@ cmd/
   access-service/
   admin-service/
   job-service/
+.planning/
+  platform/
+    task_plan.md
+    findings.md
+    progress.md
 internal/
   platform/
   services/
@@ -649,8 +742,15 @@ pkg/
 api/
   openapi/
 migrations/
+bootstrap/
+scripts/
 docs/
 test/
+  integration/
+  contract/
+  e2e/
+  performance/
+  fixtures/
 ```
 
 这样已经足够开始第一批实现。

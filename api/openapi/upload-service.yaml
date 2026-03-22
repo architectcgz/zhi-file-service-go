@@ -1,0 +1,1121 @@
+openapi: 3.0.3
+info:
+  title: zhi-file-upload-service API
+  version: 1.0.0
+  description: |
+    zhi-file-service-go 上传服务正式 OpenAPI 契约。
+    该服务统一围绕 upload session 建模，覆盖创建会话、受控代理上传、
+    multipart presign、查询分片、complete 和 abort。
+servers:
+  - url: /
+    description: 相对网关根路径
+tags:
+  - name: UploadSessions
+    description: 上传会话与上传完成链路
+security:
+  - BearerAuth: []
+paths:
+  /api/v1/upload-sessions:
+    post:
+      tags:
+        - UploadSessions
+      summary: 创建上传会话
+      description: |
+        创建新的上传会话。
+        所有上传模式都先通过这个入口创建 session，再决定后续走代理上传、
+        单对象 presigned PUT 或 provider-managed multipart 直传。
+        `DIRECT` 与 `PRESIGNED_SINGLE` 模式默认要求提供 `contentHash`，
+        且当前只支持 `SHA256`；其他算法返回 `UPLOAD_HASH_UNSUPPORTED`。
+
+        调用方可传 `Idempotency-Key` 做显式幂等控制。
+        如果请求被重复提交，服务应返回与首次成功提交语义一致的结果。
+      operationId: createUploadSession
+      x-error-codes:
+        - INVALID_ARGUMENT
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - UPLOAD_MODE_INVALID
+        - UPLOAD_HASH_REQUIRED
+        - UPLOAD_HASH_INVALID
+        - UPLOAD_HASH_UNSUPPORTED
+        - MIME_TYPE_NOT_ALLOWED
+        - TENANT_QUOTA_EXCEEDED
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUploadSessionRequest'
+            examples:
+              inlineUpload:
+                summary: 小文件代理上传
+                value:
+                  fileName: invoice-2026-03.pdf
+                  contentType: application/pdf
+                  sizeBytes: 524288
+                  accessLevel: PRIVATE
+                  uploadMode: INLINE
+                  metadata:
+                    bizType: invoice
+              multipartUpload:
+                summary: provider-managed multipart 直传
+                value:
+                  fileName: product-video.mp4
+                  contentType: video/mp4
+                  sizeBytes: 734003200
+                  accessLevel: PRIVATE
+                  uploadMode: DIRECT
+                  totalParts: 8
+                  contentHash:
+                    algorithm: SHA256
+                    value: 4f6f0d53c1efb6bb7c9f6b4e5b7d7e2b7b5b2f4b33f3ef0d4ec2ef9f74de4f75
+      responses:
+        '201':
+          description: 上传会话已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSessionResponse'
+              examples:
+                inlineCreated:
+                  summary: INLINE 会话已创建
+                  value:
+                    requestId: 01JPA7Y0P8K4AF9V6P3MCR7A7B
+                    data:
+                      uploadSessionId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+                      tenantId: demo
+                      uploadMode: INLINE
+                      status: INITIATED
+                      fileName: invoice-2026-03.pdf
+                      contentType: application/pdf
+                      sizeBytes: 524288
+                      accessLevel: PRIVATE
+                      totalParts: 1
+                      uploadedParts: 0
+                      createdAt: '2026-03-21T10:00:00Z'
+                      updatedAt: '2026-03-21T10:00:00Z'
+                presignedSingleCreated:
+                  summary: PRESIGNED_SINGLE 会话已创建
+                  value:
+                    requestId: 01JPA7Y0P8K4AF9V6P3MCR7A7B
+                    data:
+                      uploadSessionId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D5
+                      tenantId: demo
+                      uploadMode: PRESIGNED_SINGLE
+                      status: INITIATED
+                      fileName: avatar.png
+                      contentType: image/png
+                      sizeBytes: 182044
+                      accessLevel: PUBLIC
+                      totalParts: 1
+                      uploadedParts: 0
+                      putUrl: https://storage.example.com/private-bucket/demo/01JPA7Y0Q4D6CMEPH5Y7R6Q2D5
+                      putHeaders:
+                        Content-Type: image/png
+                      createdAt: '2026-03-21T10:00:00Z'
+                      updatedAt: '2026-03-21T10:00:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/upload-sessions/{uploadSessionId}:
+    get:
+      tags:
+        - UploadSessions
+      summary: 获取上传会话详情
+      description: |
+        按上传会话 ID 获取当前会话详情。
+        返回值用于轮询上传状态、查看会话模式与已完成结果。
+      operationId: getUploadSession
+      x-error-codes:
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - UPLOAD_SESSION_NOT_FOUND
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/UploadSessionId'
+      responses:
+        '200':
+          description: 上传会话详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSessionResponse'
+              examples:
+                completedSession:
+                  summary: 已完成的上传会话
+                  value:
+                    requestId: 01JPA7Z4E4M9PTHS4Q0T9NMQ8P
+                    data:
+                      uploadSessionId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+                      tenantId: demo
+                      uploadMode: DIRECT
+                      status: COMPLETED
+                      fileName: product-video.mp4
+                      contentType: video/mp4
+                      sizeBytes: 734003200
+                      accessLevel: PRIVATE
+                      totalParts: 8
+                      uploadedParts: 8
+                      fileId: 01JPA7ZZAMN4XQ1F6TQ8Y2DPRC
+                      createdAt: '2026-03-21T10:00:00Z'
+                      updatedAt: '2026-03-21T10:05:48Z'
+                      completedAt: '2026-03-21T10:05:48Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/upload-sessions/{uploadSessionId}/content:
+    put:
+      tags:
+        - UploadSessions
+      summary: 代理上传文件内容
+      description: |
+        仅用于受控代理上传场景。
+        该接口只接受二进制 body，不接受 multipart/form-data。
+        大文件默认不走这条路径，而应使用 PRESIGNED_SINGLE 或 DIRECT 模式。
+      operationId: uploadSessionContent
+      x-error-codes:
+        - INVALID_ARGUMENT
+        - PAYLOAD_TOO_LARGE
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - UPLOAD_SESSION_NOT_FOUND
+        - UPLOAD_SESSION_STATE_CONFLICT
+        - UPLOAD_MODE_INVALID
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/UploadSessionId'
+        - $ref: '#/components/parameters/ContentTypeHeader'
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: 上传内容已接收
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSessionResponse'
+              examples:
+                uploading:
+                  summary: 代理上传成功
+                  value:
+                    requestId: 01JPA8176PMJ9R1SDV0F7PWQ4Q
+                    data:
+                      uploadSessionId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+                      tenantId: demo
+                      uploadMode: INLINE
+                      status: UPLOADING
+                      fileName: invoice-2026-03.pdf
+                      contentType: application/pdf
+                      sizeBytes: 524288
+                      accessLevel: PRIVATE
+                      totalParts: 1
+                      uploadedParts: 1
+                      createdAt: '2026-03-21T10:00:00Z'
+                      updatedAt: '2026-03-21T10:00:08Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/upload-sessions/{uploadSessionId}/parts/presign:
+    post:
+      tags:
+        - UploadSessions
+      summary: 生成 multipart part presign
+      description: |
+        为 DIRECT 模式的上传会话批量生成 part 级 presigned URL。
+        该接口不会写入分片事实，权威上传结果以后续 complete 或 list parts 为准。
+      operationId: presignUploadSessionParts
+      x-error-codes:
+        - INVALID_ARGUMENT
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - UPLOAD_SESSION_NOT_FOUND
+        - UPLOAD_MODE_INVALID
+        - UPLOAD_SESSION_STATE_CONFLICT
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/UploadSessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresignMultipartPartsRequest'
+            examples:
+              batchPresign:
+                summary: 为 part 1-3 生成 presign
+                value:
+                  expiresInSeconds: 900
+                  parts:
+                    - partNumber: 1
+                    - partNumber: 2
+                    - partNumber: 3
+      responses:
+        '200':
+          description: 已生成 presigned part URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignMultipartPartsResponse'
+              examples:
+                partsPresigned:
+                  summary: presign 成功
+                  value:
+                    requestId: 01JPA81V4P8Y1Y2PR4S44SDDMB
+                    data:
+                      parts:
+                        - partNumber: 1
+                          url: https://storage.example.com/private-bucket/demo/video.mp4?partNumber=1&signature=abc
+                          expiresAt: '2026-03-21T10:15:00Z'
+                          headers:
+                            x-amz-content-sha256: UNSIGNED-PAYLOAD
+                        - partNumber: 2
+                          url: https://storage.example.com/private-bucket/demo/video.mp4?partNumber=2&signature=def
+                          expiresAt: '2026-03-21T10:15:00Z'
+                          headers:
+                            x-amz-content-sha256: UNSIGNED-PAYLOAD
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/upload-sessions/{uploadSessionId}/parts:
+    get:
+      tags:
+        - UploadSessions
+      summary: 查询已上传分片
+      description: |
+        查询 provider authoritative part 列表。
+        返回结果按 `partNumber` 升序排列，用于 complete 前校验和断点续传观察。
+      operationId: listUploadSessionParts
+      x-error-codes:
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - UPLOAD_SESSION_NOT_FOUND
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/UploadSessionId'
+      responses:
+        '200':
+          description: 分片列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadedPartsResponse'
+              examples:
+                uploadedParts:
+                  summary: 已上传 3 个分片
+                  value:
+                    requestId: 01JPA82QQ7S1P7ZQ2N5W7E2S8F
+                    data:
+                      parts:
+                        - partNumber: 1
+                          etag: '"4d186321c1a7f0f354b297e8914ab240"'
+                          sizeBytes: 104857600
+                        - partNumber: 2
+                          etag: '"44d88612fea8a8f36de82e1278abb02f"'
+                          sizeBytes: 104857600
+                        - partNumber: 3
+                          etag: '"8f14e45fceea167a5a36dedd4bea2543"'
+                          sizeBytes: 104857600
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/upload-sessions/{uploadSessionId}/complete:
+    post:
+      tags:
+        - UploadSessions
+      summary: 完成上传会话
+      description: |
+        完成上传会话并提交元数据。
+        对 DIRECT 模式，客户端应提交 authoritative uploaded parts。
+        若回传 `contentHash`，当前只支持 `SHA256`，且必须与 create 阶段保持一致。
+        该接口必须支持幂等重试；若 session 已完成，应返回既有 `fileId`。
+      operationId: completeUploadSession
+      x-error-codes:
+        - INVALID_ARGUMENT
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - UPLOAD_SESSION_NOT_FOUND
+        - UPLOAD_SESSION_STATE_CONFLICT
+        - UPLOAD_COMPLETE_IN_PROGRESS
+        - UPLOAD_PARTS_MISSING
+        - UPLOAD_HASH_MISMATCH
+        - UPLOAD_HASH_UNSUPPORTED
+        - TENANT_QUOTA_EXCEEDED
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/UploadSessionId'
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteUploadSessionRequest'
+            examples:
+              completeMultipart:
+                summary: 完成 multipart 上传
+                value:
+                  uploadedParts:
+                    - partNumber: 1
+                      etag: '"4d186321c1a7f0f354b297e8914ab240"'
+                      sizeBytes: 104857600
+                    - partNumber: 2
+                      etag: '"44d88612fea8a8f36de82e1278abb02f"'
+                      sizeBytes: 104857600
+                  contentHash:
+                    algorithm: SHA256
+                    value: 4f6f0d53c1efb6bb7c9f6b4e5b7d7e2b7b5b2f4b33f3ef0d4ec2ef9f74de4f75
+      responses:
+        '200':
+          description: 上传已完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompletedUploadSessionResponse'
+              examples:
+                completed:
+                  summary: complete 成功
+                  value:
+                    requestId: 01JPA83SE44ZFV7A2A3X3BTT1D
+                    data:
+                      fileId: 01JPA7ZZAMN4XQ1F6TQ8Y2DPRC
+                      uploadSession:
+                        uploadSessionId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+                        tenantId: demo
+                        uploadMode: DIRECT
+                        status: COMPLETED
+                        fileName: product-video.mp4
+                        contentType: video/mp4
+                        sizeBytes: 209715200
+                        accessLevel: PRIVATE
+                        totalParts: 2
+                        uploadedParts: 2
+                        fileId: 01JPA7ZZAMN4XQ1F6TQ8Y2DPRC
+                        createdAt: '2026-03-21T10:00:00Z'
+                        updatedAt: '2026-03-21T10:04:12Z'
+                        completedAt: '2026-03-21T10:04:12Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/upload-sessions/{uploadSessionId}/abort:
+    post:
+      tags:
+        - UploadSessions
+      summary: 中止上传会话
+      description: |
+        将上传会话推进为中止终态。
+        已进入终态的会话应返回幂等成功，不允许再次上传或 complete。
+      operationId: abortUploadSession
+      x-error-codes:
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - UPLOAD_SESSION_NOT_FOUND
+        - UPLOAD_SESSION_STATE_CONFLICT
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/UploadSessionId'
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AbortUploadSessionRequest'
+            examples:
+              withReason:
+                summary: 带人工中止原因
+                value:
+                  reason: user cancelled upload from web console
+      responses:
+        '200':
+          description: 上传会话已中止
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSessionResponse'
+              examples:
+                aborted:
+                  summary: session 已中止
+                  value:
+                    requestId: 01JPA84R6KP5JWSM41M2GCAJMF
+                    data:
+                      uploadSessionId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+                      tenantId: demo
+                      uploadMode: INLINE
+                      status: ABORTED
+                      fileName: invoice-2026-03.pdf
+                      contentType: application/pdf
+                      sizeBytes: 524288
+                      accessLevel: PRIVATE
+                      totalParts: 1
+                      uploadedParts: 0
+                      createdAt: '2026-03-21T10:00:00Z'
+                      updatedAt: '2026-03-21T10:01:10Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 数据面 Bearer Token，tenant 与主体语义以 AuthContext 契约为准。
+  parameters:
+    UploadSessionId:
+      name: uploadSessionId
+      in: path
+      required: true
+      description: 上传会话 ID，推荐使用 ULID。
+      schema:
+        type: string
+        minLength: 26
+      example: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: 用于 create、complete、abort 等写操作的幂等键。
+      schema:
+        type: string
+        maxLength: 128
+      example: create-upload-01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+    XRequestIdHeader:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: 调用方自定义请求 ID。若未传，服务可自动生成并回写到响应体中的 `requestId`。
+      schema:
+        type: string
+        maxLength: 128
+      example: req-01JPA7Y0P8K4AF9V6P3MCR7A7B
+    ContentTypeHeader:
+      name: Content-Type
+      in: header
+      required: true
+      description: 代理上传的内容类型。
+      schema:
+        type: string
+      example: application/pdf
+  responses:
+    BadRequest:
+      description: 请求参数非法或契约不满足
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidArgument:
+              summary: 基础参数错误
+              value:
+                requestId: 01JPA8574B5AFAFAZ4PZV7R0R4
+                error:
+                  code: INVALID_ARGUMENT
+                  message: request validation failed
+                  details:
+                    field: fileName
+                    reason: required
+            uploadHashRequired:
+              summary: 当前模式缺少 contentHash
+              value:
+                requestId: 01JPA8574B5AFAFAZ4PZV7R0R4
+                error:
+                  code: UPLOAD_HASH_REQUIRED
+                  message: content hash is required for current upload mode
+                  details:
+                    field: contentHash
+                    reason: required
+            uploadModeInvalid:
+              summary: 上传模式与接口不匹配
+              value:
+                requestId: 01JPA8574B5AFAFAZ4PZV7R0R4
+                error:
+                  code: UPLOAD_MODE_INVALID
+                  message: upload mode does not support this operation
+                  details:
+                    resourceType: uploadSession
+                    currentStatus: INITIATED
+            uploadHashUnsupported:
+              summary: 哈希算法当前不支持
+              value:
+                requestId: 01JPA8574B5AFAFAZ4PZV7R0R4
+                error:
+                  code: UPLOAD_HASH_UNSUPPORTED
+                  message: content hash algorithm is not supported
+                  details:
+                    field: contentHash.algorithm
+                    reason: unsupported_value
+    Unauthorized:
+      description: 未认证或 token 无效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPA85QW0G7A6YG1E0XZ7J34M
+            error:
+              code: UNAUTHORIZED
+              message: bearer token is missing or invalid
+              details: {}
+    Forbidden:
+      description: 已认证但无权访问当前资源
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPA8629WRK7FKMXA79YMP6YQ
+            error:
+              code: FORBIDDEN
+              message: current subject cannot access this upload session
+              details:
+                resourceType: uploadSession
+                resourceId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPA86700JMCME71P0PH0SFMG
+            error:
+              code: UPLOAD_SESSION_NOT_FOUND
+              message: upload session not found
+              details:
+                resourceType: uploadSession
+                resourceId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+    Conflict:
+      description: 资源状态冲突、并发冲突或业务约束冲突
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            stateConflict:
+              summary: 状态不允许 complete
+              value:
+                requestId: 01JPA86RGWZVEP4K2B00CCMZHY
+                error:
+                  code: UPLOAD_SESSION_STATE_CONFLICT
+                  message: upload session cannot be completed in current status
+                  details:
+                    resourceType: uploadSession
+                    resourceId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+                    currentStatus: ABORTED
+                    allowedStatuses:
+                      - UPLOADING
+                      - COMPLETING
+            completeInProgress:
+              summary: 已有另一个 complete 在进行
+              value:
+                requestId: 01JPA86RGWZVEP4K2B00CCMZHY
+                error:
+                  code: UPLOAD_COMPLETE_IN_PROGRESS
+                  message: another completion is already in progress
+                  details:
+                    resourceType: uploadSession
+                    resourceId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+            partsMissing:
+              summary: complete 时缺少分片
+              value:
+                requestId: 01JPA86RGWZVEP4K2B00CCMZHY
+                error:
+                  code: UPLOAD_PARTS_MISSING
+                  message: uploaded parts are incomplete
+                  details:
+                    resourceType: uploadSession
+                    resourceId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+            quotaExceeded:
+              summary: 租户配额超限
+              value:
+                requestId: 01JPA86RGWZVEP4K2B00CCMZHY
+                error:
+                  code: TENANT_QUOTA_EXCEEDED
+                  message: tenant quota exceeded
+                  details:
+                    limit: 1073741824
+                    reason: used_storage_bytes
+    PayloadTooLarge:
+      description: 上传内容超出限制
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPA874M5N6X3AN4M3Q85C6RH
+            error:
+              code: PAYLOAD_TOO_LARGE
+              message: inline upload payload exceeds configured limit
+              details:
+                limit: 10485760
+                field: sizeBytes
+    TooManyRequests:
+      description: 触发限流
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPA87CRVRZCGZXR0ZJ4JEMEF
+            error:
+              code: RATE_LIMITED
+              message: request rate exceeded current limit
+              details:
+                retryAfterSeconds: 30
+    InternalError:
+      description: 服务内部错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPA87N6CV6ZATG4BJWVEF7AH
+            error:
+              code: INTERNAL_ERROR
+              message: internal server error
+              details: {}
+    ServiceUnavailable:
+      description: 关键依赖不可用
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPA87W8N6YV5AJAE8WNK7ARW
+            error:
+              code: SERVICE_UNAVAILABLE
+              message: storage dependency is temporarily unavailable
+              details: {}
+  schemas:
+    CreateUploadSessionRequest:
+      type: object
+      required:
+        - fileName
+        - contentType
+        - uploadMode
+      properties:
+        fileName:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: 原始文件名。
+          example: invoice-2026-03.pdf
+        contentType:
+          type: string
+          description: 期望的 MIME 类型。
+          example: application/pdf
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 文件字节大小。DIRECT 模式建议显式提供。
+          example: 524288
+        contentHash:
+          $ref: '#/components/schemas/ContentHash'
+        accessLevel:
+          $ref: '#/components/schemas/AccessLevel'
+        uploadMode:
+          $ref: '#/components/schemas/UploadMode'
+        totalParts:
+          type: integer
+          minimum: 1
+          description: DIRECT 模式的预期总分片数。
+          example: 8
+        metadata:
+          type: object
+          description: 业务扩展元数据。
+          additionalProperties:
+            type: string
+    ContentHash:
+      type: object
+      required:
+        - algorithm
+        - value
+      properties:
+        algorithm:
+          type: string
+          minLength: 1
+          description: 当前仅支持 `SHA256`。其他值返回 `UPLOAD_HASH_UNSUPPORTED`。
+          example: SHA256
+        value:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: 小写十六进制 SHA256。
+          example: 4f6f0d53c1efb6bb7c9f6b4e5b7d7e2b7b5b2f4b33f3ef0d4ec2ef9f74de4f75
+    UploadMode:
+      type: string
+      description: |
+        上传模式。
+        `INLINE` 表示服务端受控代理上传；
+        `PRESIGNED_SINGLE` 表示单对象 presigned PUT；
+        `DIRECT` 表示 provider-managed multipart 直传。
+      enum:
+        - INLINE
+        - PRESIGNED_SINGLE
+        - DIRECT
+      example: DIRECT
+    AccessLevel:
+      type: string
+      enum:
+        - PUBLIC
+        - PRIVATE
+      example: PRIVATE
+    UploadSessionStatus:
+      type: string
+      enum:
+        - INITIATED
+        - UPLOADING
+        - COMPLETING
+        - COMPLETED
+        - ABORTED
+        - EXPIRED
+        - FAILED
+      example: INITIATED
+    UploadSession:
+      type: object
+      required:
+        - uploadSessionId
+        - tenantId
+        - uploadMode
+        - status
+        - fileName
+        - contentType
+        - accessLevel
+        - createdAt
+        - updatedAt
+      properties:
+        uploadSessionId:
+          type: string
+          example: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+        tenantId:
+          type: string
+          example: demo
+        uploadMode:
+          $ref: '#/components/schemas/UploadMode'
+        status:
+          $ref: '#/components/schemas/UploadSessionStatus'
+        fileName:
+          type: string
+          example: invoice-2026-03.pdf
+        contentType:
+          type: string
+          example: application/pdf
+        sizeBytes:
+          type: integer
+          format: int64
+          example: 524288
+        accessLevel:
+          $ref: '#/components/schemas/AccessLevel'
+        totalParts:
+          type: integer
+          minimum: 1
+          example: 8
+        uploadedParts:
+          type: integer
+          minimum: 0
+          example: 3
+        putUrl:
+          type: string
+          format: uri
+          description: "`PRESIGNED_SINGLE` 模式下返回的 PUT URL。"
+        putHeaders:
+          type: object
+          additionalProperties:
+            type: string
+          description: 调用 PUT URL 时需要附带的 header。
+        fileId:
+          type: string
+          description: 当 session 完成后返回的最终文件 ID。
+          example: 01JPA7ZZAMN4XQ1F6TQ8Y2DPRC
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:00:00Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:00:08Z'
+        completedAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:04:12Z'
+    UploadedPart:
+      type: object
+      required:
+        - partNumber
+        - etag
+      properties:
+        partNumber:
+          type: integer
+          minimum: 1
+          example: 1
+        etag:
+          type: string
+          example: '"4d186321c1a7f0f354b297e8914ab240"'
+        sizeBytes:
+          type: integer
+          format: int64
+          example: 104857600
+    PresignMultipartPartsRequest:
+      type: object
+      required:
+        - parts
+      properties:
+        expiresInSeconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+          description: 本次返回 URL 的有效期。未传则使用服务默认值。
+          example: 900
+        parts:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - partNumber
+            properties:
+              partNumber:
+                type: integer
+                minimum: 1
+                example: 1
+    PresignedPart:
+      type: object
+      required:
+        - partNumber
+        - url
+        - expiresAt
+      properties:
+        partNumber:
+          type: integer
+          minimum: 1
+          example: 1
+        url:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:15:00Z'
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+    CompleteUploadSessionRequest:
+      type: object
+      properties:
+        uploadedParts:
+          type: array
+          description: DIRECT 模式下的 authoritative uploaded parts。
+          items:
+            $ref: '#/components/schemas/UploadedPart'
+        contentHash:
+          $ref: '#/components/schemas/ContentHash'
+    AbortUploadSessionRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 512
+          description: 中止原因，仅用于审计和排障。
+          example: user cancelled upload from web console
+    UploadSessionResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPA7Y0P8K4AF9V6P3MCR7A7B
+        data:
+          $ref: '#/components/schemas/UploadSession'
+    CompletedUploadSessionResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPA83SE44ZFV7A2A3X3BTT1D
+        data:
+          type: object
+          required:
+            - uploadSession
+            - fileId
+          properties:
+            uploadSession:
+              $ref: '#/components/schemas/UploadSession'
+            fileId:
+              type: string
+              example: 01JPA7ZZAMN4XQ1F6TQ8Y2DPRC
+    PresignMultipartPartsResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPA81V4P8Y1Y2PR4S44SDDMB
+        data:
+          type: object
+          required:
+            - parts
+          properties:
+            parts:
+              type: array
+              items:
+                $ref: '#/components/schemas/PresignedPart'
+    UploadedPartsResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPA82QQ7S1P7ZQ2N5W7E2S8F
+        data:
+          type: object
+          required:
+            - parts
+          properties:
+            parts:
+              type: array
+              items:
+                $ref: '#/components/schemas/UploadedPart'
+    ErrorDetail:
+      type: object
+      additionalProperties: true
+      description: 结构化错误详情，字段规范以错误码注册表为准。
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: UPLOAD_SESSION_NOT_FOUND
+        message:
+          type: string
+          example: upload session not found
+        details:
+          $ref: '#/components/schemas/ErrorDetail'
+    ErrorResponse:
+      type: object
+      required:
+        - requestId
+        - error
+      properties:
+        requestId:
+          type: string
+          example: 01JPA86700JMCME71P0PH0SFMG
+        error:
+          $ref: '#/components/schemas/Error'

@@ -1,0 +1,1431 @@
+openapi: 3.0.3
+info:
+  title: zhi-file-admin-service API
+  version: 1.0.0
+  description: |
+    zhi-file-service-go 管理服务正式 OpenAPI 契约。
+    该服务负责租户治理、策略配置、后台文件治理和审计查询。
+servers:
+  - url: /
+    description: 相对网关根路径
+tags:
+  - name: Tenants
+    description: 租户生命周期、状态与查询
+  - name: TenantPolicy
+    description: 租户策略与配额
+  - name: Files
+    description: 后台文件治理
+  - name: AuditLogs
+    description: 管理操作审计
+security:
+  - AdminBearerAuth: []
+paths:
+  /api/admin/v1/tenants:
+    get:
+      tags:
+        - Tenants
+      summary: 查询租户列表
+      description: |
+        使用 cursor 分页查询租户列表。
+        返回结果仅包含当前管理员 tenant scope 可见范围内的数据。
+      operationId: listTenants
+      x-error-codes:
+        - UNAUTHORIZED
+        - ADMIN_PERMISSION_DENIED
+        - TENANT_SCOPE_DENIED
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          required: false
+          description: 按租户状态过滤。
+          schema:
+            $ref: '#/components/schemas/TenantStatus'
+      responses:
+        '200':
+          description: 租户列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantListResponse'
+              examples:
+                tenants:
+                  summary: 查询到两条租户记录
+                  value:
+                    requestId: 01JPAESVDD3WN8M91D6NWH7QMR
+                    data:
+                      - tenantId: demo
+                        tenantName: Demo Tenant
+                        status: ACTIVE
+                        contactEmail: ops@example.com
+                        description: default demo tenant
+                        createdAt: '2026-03-21T09:00:00Z'
+                        updatedAt: '2026-03-21T09:00:00Z'
+                      - tenantId: blog
+                        tenantName: Blog Tenant
+                        status: SUSPENDED
+                        contactEmail: admin@blog.example.com
+                        description: suspended for abuse review
+                        createdAt: '2026-03-20T08:00:00Z'
+                        updatedAt: '2026-03-21T08:30:00Z'
+                    page:
+                      nextCursor: 01JPAET8NBN3RQG0Z9W6Y1D4R2
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags:
+        - Tenants
+      summary: 创建租户
+      description: |
+        创建租户并初始化租户策略、租户使用量等配套数据。
+        该接口默认要求 `admin.super` 级权限，并支持幂等键。
+      operationId: createTenant
+      x-error-codes:
+        - INVALID_ARGUMENT
+        - UNAUTHORIZED
+        - ADMIN_PERMISSION_DENIED
+        - TENANT_SCOPE_DENIED
+        - CONFLICT
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantRequest'
+            examples:
+              createTenant:
+                summary: 创建租户
+                value:
+                  tenantId: demo
+                  tenantName: Demo Tenant
+                  contactEmail: ops@example.com
+                  description: default demo tenant
+      responses:
+        '201':
+          description: 租户已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+              examples:
+                created:
+                  summary: 创建成功
+                  value:
+                    requestId: 01JPAEVC7TR7BY62WGASR8J0J9
+                    data:
+                      tenantId: demo
+                      tenantName: Demo Tenant
+                      status: ACTIVE
+                      contactEmail: ops@example.com
+                      description: default demo tenant
+                      createdAt: '2026-03-21T09:00:00Z'
+                      updatedAt: '2026-03-21T09:00:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/admin/v1/tenants/{tenantId}:
+    get:
+      tags:
+        - Tenants
+      summary: 获取租户详情
+      description: |
+        获取单个租户的基础信息。
+        结果受管理员 tenant scope 约束。
+      operationId: getTenant
+      x-error-codes:
+        - UNAUTHORIZED
+        - ADMIN_PERMISSION_DENIED
+        - TENANT_SCOPE_DENIED
+        - TENANT_NOT_FOUND
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: 租户详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+              examples:
+                tenant:
+                  summary: 当前租户详情
+                  value:
+                    requestId: 01JPAEXVSMV1Q4PNH5N1TTRR2R
+                    data:
+                      tenantId: demo
+                      tenantName: Demo Tenant
+                      status: ACTIVE
+                      contactEmail: ops@example.com
+                      description: default demo tenant
+                      createdAt: '2026-03-21T09:00:00Z'
+                      updatedAt: '2026-03-21T09:00:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags:
+        - Tenants
+      summary: 更新租户
+      description: |
+        更新租户基础信息。
+        支持幂等键。
+        当 `status` 变更为 `SUSPENDED`、`DELETED` 等 destructive 治理动作时，
+        请求体必须显式携带 `reason`，并与审计记录同事务落库。
+      operationId: patchTenant
+      x-error-codes:
+        - INVALID_ARGUMENT
+        - UNAUTHORIZED
+        - ADMIN_PERMISSION_DENIED
+        - TENANT_SCOPE_DENIED
+        - TENANT_NOT_FOUND
+        - TENANT_STATUS_INVALID
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchTenantRequest'
+            examples:
+              suspendTenant:
+                summary: 冻结租户
+                value:
+                  status: SUSPENDED
+                  reason: suspended for abuse review
+                  description: suspended for abuse review
+              renameTenant:
+                summary: 修改名称与联系人
+                value:
+                  tenantName: Demo Tenant CN
+                  contactEmail: platform@example.com
+      responses:
+        '200':
+          description: 租户已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+              examples:
+                patched:
+                  summary: 更新成功
+                  value:
+                    requestId: 01JPAEZ95YDV4XYV38TAN90DJ4
+                    data:
+                      tenantId: demo
+                      tenantName: Demo Tenant CN
+                      status: ACTIVE
+                      contactEmail: platform@example.com
+                      description: default demo tenant
+                      createdAt: '2026-03-21T09:00:00Z'
+                      updatedAt: '2026-03-21T09:10:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/admin/v1/tenants/{tenantId}/policy:
+    get:
+      tags:
+        - TenantPolicy
+      summary: 获取租户策略
+      description: |
+        返回租户上传与访问策略。
+      operationId: getTenantPolicy
+      x-error-codes:
+        - UNAUTHORIZED
+        - ADMIN_PERMISSION_DENIED
+        - TENANT_SCOPE_DENIED
+        - TENANT_NOT_FOUND
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: 租户策略
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantPolicyResponse'
+              examples:
+                policy:
+                  summary: 当前租户策略
+                  value:
+                    requestId: 01JPAF0KVRBKGDBRC0D6VHY2CA
+                    data:
+                      tenantId: demo
+                      maxStorageBytes: 10737418240
+                      maxFileCount: 100000
+                      maxSingleFileSize: 2147483648
+                      allowedMimeTypes:
+                        - application/pdf
+                        - image/png
+                        - video/mp4
+                      allowedExtensions:
+                        - pdf
+                        - png
+                        - mp4
+                      defaultAccessLevel: PRIVATE
+                      autoCreateEnabled: false
+                      createdAt: '2026-03-21T09:00:00Z'
+                      updatedAt: '2026-03-21T09:00:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags:
+        - TenantPolicy
+      summary: 更新租户策略
+      description: |
+        更新租户上传与访问策略。
+        该接口支持幂等键，并应与审计记录同事务落库。
+        当策略收紧会导致 destructive 影响时，请求体必须显式携带 `reason`。
+      operationId: patchTenantPolicy
+      x-error-codes:
+        - INVALID_ARGUMENT
+        - TENANT_POLICY_INVALID
+        - UNAUTHORIZED
+        - ADMIN_PERMISSION_DENIED
+        - TENANT_SCOPE_DENIED
+        - TENANT_NOT_FOUND
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchTenantPolicyRequest'
+            examples:
+              policyPatch:
+                summary: 调整配额与白名单
+                value:
+                  maxStorageBytes: 21474836480
+                  maxFileCount: 200000
+                  maxSingleFileSize: 4294967296
+                  reason: tighten upload policy after abuse spikes
+                  allowedMimeTypes:
+                    - application/pdf
+                    - image/png
+                    - video/mp4
+                  allowedExtensions:
+                    - pdf
+                    - png
+                    - mp4
+                  defaultAccessLevel: PRIVATE
+      responses:
+        '200':
+          description: 租户策略已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantPolicyResponse'
+              examples:
+                patchedPolicy:
+                  summary: 更新成功
+                  value:
+                    requestId: 01JPAF2ZWQ8G55F2P74ZPGA4Y1
+                    data:
+                      tenantId: demo
+                      maxStorageBytes: 21474836480
+                      maxFileCount: 200000
+                      maxSingleFileSize: 4294967296
+                      allowedMimeTypes:
+                        - application/pdf
+                        - image/png
+                        - video/mp4
+                      allowedExtensions:
+                        - pdf
+                        - png
+                        - mp4
+                      defaultAccessLevel: PRIVATE
+                      autoCreateEnabled: false
+                      createdAt: '2026-03-21T09:00:00Z'
+                      updatedAt: '2026-03-21T09:20:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/admin/v1/tenants/{tenantId}/usage:
+    get:
+      tags:
+        - TenantPolicy
+      summary: 获取租户使用量
+      description: |
+        返回租户聚合使用量视图。
+        第一阶段数据来自 `tenant_usage` 聚合表，而不是实时全表扫描。
+      operationId: getTenantUsage
+      x-error-codes:
+        - UNAUTHORIZED
+        - ADMIN_PERMISSION_DENIED
+        - TENANT_SCOPE_DENIED
+        - TENANT_NOT_FOUND
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: 租户使用量
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantUsageResponse'
+              examples:
+                usage:
+                  summary: 当前租户使用量
+                  value:
+                    requestId: 01JPAF4YMEQW0YJ3VQ5G6RRVPW
+                    data:
+                      tenantId: demo
+                      usedStorageBytes: 3435973836
+                      usedFileCount: 1240
+                      lastUploadAt: '2026-03-21T09:58:00Z'
+                      updatedAt: '2026-03-21T10:00:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/admin/v1/files:
+    get:
+      tags:
+        - Files
+      summary: 查询文件列表
+      description: |
+        查询后台文件列表，支持租户和状态过滤。
+        该接口统一使用 cursor 分页，不使用 offset。
+      operationId: listAdminFiles
+      x-error-codes:
+        - UNAUTHORIZED
+        - ADMIN_PERMISSION_DENIED
+        - TENANT_SCOPE_DENIED
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: tenantId
+          in: query
+          required: false
+          description: 按 tenant 过滤。
+          schema:
+            type: string
+          example: demo
+        - name: status
+          in: query
+          required: false
+          description: 按文件状态过滤。
+          schema:
+            $ref: '#/components/schemas/FileStatus'
+      responses:
+        '200':
+          description: 文件列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminFileListResponse'
+              examples:
+                files:
+                  summary: 查询到两条文件记录
+                  value:
+                    requestId: 01JPAF69T1PG3SB2P4WJM3JTNX
+                    data:
+                      - fileId: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+                        tenantId: demo
+                        fileName: invoice-2026-03.pdf
+                        contentType: application/pdf
+                        sizeBytes: 524288
+                        accessLevel: PRIVATE
+                        status: ACTIVE
+                        createdAt: '2026-03-21T10:00:00Z'
+                        updatedAt: '2026-03-21T10:00:03Z'
+                      - fileId: 01JPACWQ6A9Y0MST6FZFSGC4Y2
+                        tenantId: demo
+                        fileName: avatar.png
+                        contentType: image/png
+                        sizeBytes: 182044
+                        accessLevel: PUBLIC
+                        status: DELETED
+                        createdAt: '2026-03-21T09:00:00Z'
+                        updatedAt: '2026-03-21T09:30:00Z'
+                        deletedAt: '2026-03-21T09:30:00Z'
+                    page:
+                      nextCursor: 01JPAF6H24ZWSE2QRBWJ8XYN5T
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/admin/v1/files/{fileId}:
+    get:
+      tags:
+        - Files
+      summary: 获取文件详情
+      description: |
+        获取后台治理视角下的文件详情。
+      operationId: getAdminFile
+      x-error-codes:
+        - UNAUTHORIZED
+        - ADMIN_PERMISSION_DENIED
+        - TENANT_SCOPE_DENIED
+        - FILE_NOT_FOUND
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/FileId'
+      responses:
+        '200':
+          description: 文件详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminFileResponse'
+              examples:
+                file:
+                  summary: 文件详情
+                  value:
+                    requestId: 01JPAF7ZDJQH2PQWJ1T6W9G7DK
+                    data:
+                      fileId: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+                      tenantId: demo
+                      fileName: invoice-2026-03.pdf
+                      contentType: application/pdf
+                      sizeBytes: 524288
+                      accessLevel: PRIVATE
+                      status: ACTIVE
+                      createdAt: '2026-03-21T10:00:00Z'
+                      updatedAt: '2026-03-21T10:00:03Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Files
+      summary: 删除文件
+      description: |
+        删除文件属于 destructive operation。
+        该接口只负责逻辑删除、引用计数和 usage 更新，不同步物理删除对象存储。
+        真正的对象物理清理由 `job-service` 在保留窗口后执行。
+      operationId: deleteAdminFile
+      x-error-codes:
+        - INVALID_ARGUMENT
+        - UNAUTHORIZED
+        - ADMIN_PERMISSION_DENIED
+        - TENANT_SCOPE_DENIED
+        - FILE_NOT_FOUND
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/FileId'
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteFileRequest'
+            examples:
+              deleteFile:
+                summary: 删除文件必须带审计原因
+                value:
+                  reason: manual cleanup for abuse case
+      responses:
+        '200':
+          description: 文件已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteFileResponse'
+              examples:
+                deleted:
+                  summary: 删除成功
+                  value:
+                    requestId: 01JPAF9M8KSM7MWEYB6P2R2G0Z
+                    data:
+                      fileId: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+                      status: DELETED
+                      deletedAt: '2026-03-21T10:20:00Z'
+                      physicalDeleteScheduled: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/admin/v1/audit-logs:
+    get:
+      tags:
+        - AuditLogs
+      summary: 查询审计日志
+      description: |
+        查询后台治理操作的审计日志。
+        结果统一使用 cursor 分页，并可按 tenant、actor、action 过滤。
+      operationId: listAuditLogs
+      x-error-codes:
+        - AUDIT_QUERY_INVALID
+        - UNAUTHORIZED
+        - ADMIN_PERMISSION_DENIED
+        - TENANT_SCOPE_DENIED
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+        - SERVICE_UNAVAILABLE
+      parameters:
+        - $ref: '#/components/parameters/XRequestIdHeader'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: tenantId
+          in: query
+          required: false
+          description: 按 tenant 过滤。
+          schema:
+            type: string
+          example: demo
+        - name: actorId
+          in: query
+          required: false
+          description: 按管理员主体过滤。
+          schema:
+            type: string
+          example: admin-001
+        - name: action
+          in: query
+          required: false
+          description: 按动作过滤。
+          schema:
+            type: string
+          example: FILE_DELETE
+      responses:
+        '200':
+          description: 审计日志列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogListResponse'
+              examples:
+                auditLogs:
+                  summary: 两条审计日志
+                  value:
+                    requestId: 01JPAFB5Y1YHKJ5Z8WV5Z60Y4Q
+                    data:
+                      - auditLogId: 01JPAFAWZ0B7K4GSHF0J7T7N1E
+                        tenantId: demo
+                        actorId: admin-001
+                        action: FILE_DELETE
+                        targetType: file
+                        targetId: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+                        details:
+                          reason: manual cleanup for abuse case
+                        createdAt: '2026-03-21T10:20:00Z'
+                      - auditLogId: 01JPAFAYPAB4PKQ9JQ4GY2B3P4
+                        tenantId: demo
+                        actorId: admin-001
+                        action: PATCH_TENANT_POLICY
+                        targetType: tenantPolicy
+                        targetId: demo
+                        details:
+                          changedFields:
+                            - maxStorageBytes
+                        createdAt: '2026-03-21T09:20:00Z'
+                    page:
+                      nextCursor: 01JPAFBX9K1RWK4T4X4B0RXEY5
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+components:
+  securitySchemes:
+    AdminBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 管理面专用 Bearer Token，角色与 tenant scope 语义以 admin auth 文档为准。
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      description: 租户 ID。
+      schema:
+        type: string
+        minLength: 1
+      example: demo
+    FileId:
+      name: fileId
+      in: path
+      required: true
+      description: 文件 ID，推荐使用 ULID。
+      schema:
+        type: string
+        minLength: 26
+      example: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: 不透明游标。客户端只应透传，不应自行解析。
+      schema:
+        type: string
+      example: 01JPAET8NBN3RQG0Z9W6Y1D4R2
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: 每页大小。
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 20
+      example: 20
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: 创建租户、更新租户、更新策略、删除文件等写操作的幂等键。
+      schema:
+        type: string
+        maxLength: 128
+      example: admin-write-01JPAEVC7TR7BY62WGASR8J0J9
+    XRequestIdHeader:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: 调用方自定义请求 ID。
+      schema:
+        type: string
+        maxLength: 128
+      example: req-01JPAESVDD3WN8M91D6NWH7QMR
+  responses:
+    BadRequest:
+      description: 请求参数非法或策略参数不合法
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidArgument:
+              summary: 基础参数错误
+              value:
+                requestId: 01JPAFC2K46B24S6K6KJ3ENJH2
+                error:
+                  code: INVALID_ARGUMENT
+                  message: request validation failed
+                  details:
+                    field: tenantId
+                    reason: required
+            tenantPolicyInvalid:
+              summary: 租户策略非法
+              value:
+                requestId: 01JPAFC2K46B24S6K6KJ3ENJH2
+                error:
+                  code: TENANT_POLICY_INVALID
+                  message: tenant policy is invalid
+                  details:
+                    field: maxSingleFileSize
+                    reason: must_be_positive
+            auditQueryInvalid:
+              summary: 审计查询参数非法
+              value:
+                requestId: 01JPAFC2K46B24S6K6KJ3ENJH2
+                error:
+                  code: AUDIT_QUERY_INVALID
+                  message: audit query parameter is invalid
+                  details:
+                    field: action
+                    reason: unsupported_value
+    Unauthorized:
+      description: 未认证或 token 无效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPAFCX2TG4F6A9D0YS2BND4Y
+            error:
+              code: UNAUTHORIZED
+              message: bearer token is missing or invalid
+              details: {}
+    Forbidden:
+      description: 已认证但权限不足或 tenant scope 不匹配
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            adminPermissionDenied:
+              summary: 管理员角色不足
+              value:
+                requestId: 01JPAFD8MTY2T7NN4V8V8R5K8H
+                error:
+                  code: ADMIN_PERMISSION_DENIED
+                  message: current admin role cannot perform this operation
+                  details:
+                    resourceType: tenant
+                    resourceId: demo
+            tenantScopeDenied:
+              summary: tenant scope 不匹配
+              value:
+                requestId: 01JPAFD8MTY2T7NN4V8V8R5K8H
+                error:
+                  code: TENANT_SCOPE_DENIED
+                  message: current admin cannot access the requested tenant
+                  details:
+                    resourceType: tenant
+                    resourceId: demo
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            tenantNotFound:
+              summary: 租户不存在
+              value:
+                requestId: 01JPAFDM0FCP47D9V59Q8KAZ3Q
+                error:
+                  code: TENANT_NOT_FOUND
+                  message: tenant not found
+                  details:
+                    resourceType: tenant
+                    resourceId: demo
+            fileNotFound:
+              summary: 文件不存在
+              value:
+                requestId: 01JPAFDM0FCP47D9V59Q8KAZ3Q
+                error:
+                  code: FILE_NOT_FOUND
+                  message: file not found
+                  details:
+                    resourceType: file
+                    resourceId: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+    Conflict:
+      description: 资源状态冲突
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            tenantStatusInvalid:
+              summary: 租户状态不允许当前操作
+              value:
+                requestId: 01JPAFE4PJ8XCC7SF7V23KHAQH
+                error:
+                  code: TENANT_STATUS_INVALID
+                  message: tenant status does not allow this operation
+                  details:
+                    resourceType: tenant
+                    resourceId: demo
+                    currentStatus: DELETED
+    TooManyRequests:
+      description: 触发限流
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPAFEFYQT14SZBTQ5C7V2X8W
+            error:
+              code: RATE_LIMITED
+              message: request rate exceeded current limit
+              details:
+                retryAfterSeconds: 30
+    InternalError:
+      description: 服务内部错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPAFEP6BXV3ZEG6Q0FW2R2SJ
+            error:
+              code: INTERNAL_ERROR
+              message: internal server error
+              details: {}
+    ServiceUnavailable:
+      description: 关键依赖不可用
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            requestId: 01JPAFF03CV2G9ZV7VEEJ2Q2XB
+            error:
+              code: SERVICE_UNAVAILABLE
+              message: service dependency is temporarily unavailable
+              details: {}
+  schemas:
+    TenantStatus:
+      type: string
+      enum:
+        - ACTIVE
+        - SUSPENDED
+        - DELETED
+      example: ACTIVE
+    FileStatus:
+      type: string
+      enum:
+        - ACTIVE
+        - DELETED
+      example: ACTIVE
+    AccessLevel:
+      type: string
+      enum:
+        - PUBLIC
+        - PRIVATE
+      example: PRIVATE
+    PageInfo:
+      type: object
+      properties:
+        nextCursor:
+          type: string
+          description: 下一页游标。为空或缺失表示没有更多数据。
+          example: 01JPAET8NBN3RQG0Z9W6Y1D4R2
+    Tenant:
+      type: object
+      required:
+        - tenantId
+        - tenantName
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        tenantId:
+          type: string
+          example: demo
+        tenantName:
+          type: string
+          example: Demo Tenant
+        status:
+          $ref: '#/components/schemas/TenantStatus'
+        contactEmail:
+          type: string
+          format: email
+          example: ops@example.com
+        description:
+          type: string
+          example: default demo tenant
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T09:00:00Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T09:10:00Z'
+    TenantPolicy:
+      type: object
+      required:
+        - tenantId
+        - maxStorageBytes
+        - maxFileCount
+        - maxSingleFileSize
+        - defaultAccessLevel
+        - autoCreateEnabled
+        - createdAt
+        - updatedAt
+      properties:
+        tenantId:
+          type: string
+          example: demo
+        maxStorageBytes:
+          type: integer
+          format: int64
+          example: 10737418240
+        maxFileCount:
+          type: integer
+          format: int64
+          example: 100000
+        maxSingleFileSize:
+          type: integer
+          format: int64
+          example: 2147483648
+        allowedMimeTypes:
+          type: array
+          items:
+            type: string
+        allowedExtensions:
+          type: array
+          items:
+            type: string
+        defaultAccessLevel:
+          $ref: '#/components/schemas/AccessLevel'
+        autoCreateEnabled:
+          type: boolean
+          example: false
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T09:00:00Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T09:20:00Z'
+    TenantUsage:
+      type: object
+      required:
+        - tenantId
+        - usedStorageBytes
+        - usedFileCount
+        - updatedAt
+      properties:
+        tenantId:
+          type: string
+          example: demo
+        usedStorageBytes:
+          type: integer
+          format: int64
+          example: 3435973836
+        usedFileCount:
+          type: integer
+          format: int64
+          example: 1240
+        lastUploadAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T09:58:00Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:00:00Z'
+    AdminFile:
+      type: object
+      required:
+        - fileId
+        - tenantId
+        - fileName
+        - status
+        - accessLevel
+        - createdAt
+        - updatedAt
+      properties:
+        fileId:
+          type: string
+          example: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+        tenantId:
+          type: string
+          example: demo
+        fileName:
+          type: string
+          example: invoice-2026-03.pdf
+        contentType:
+          type: string
+          example: application/pdf
+        sizeBytes:
+          type: integer
+          format: int64
+          example: 524288
+        accessLevel:
+          $ref: '#/components/schemas/AccessLevel'
+        status:
+          $ref: '#/components/schemas/FileStatus'
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:00:00Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:00:03Z'
+        deletedAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:20:00Z'
+    AuditLog:
+      type: object
+      required:
+        - auditLogId
+        - action
+        - targetType
+        - createdAt
+      properties:
+        auditLogId:
+          type: string
+          example: 01JPAFAWZ0B7K4GSHF0J7T7N1E
+        tenantId:
+          type: string
+          example: demo
+        actorId:
+          type: string
+          example: admin-001
+        action:
+          type: string
+          example: FILE_DELETE
+        targetType:
+          type: string
+          example: file
+        targetId:
+          type: string
+          example: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+        details:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:20:00Z'
+    CreateTenantRequest:
+      type: object
+      required:
+        - tenantId
+        - tenantName
+      properties:
+        tenantId:
+          type: string
+          minLength: 1
+          maxLength: 32
+          example: demo
+        tenantName:
+          type: string
+          minLength: 1
+          maxLength: 128
+          example: Demo Tenant
+        contactEmail:
+          type: string
+          format: email
+          example: ops@example.com
+        description:
+          type: string
+          maxLength: 500
+          example: default demo tenant
+    PatchTenantRequest:
+      type: object
+      properties:
+        tenantName:
+          type: string
+          minLength: 1
+          maxLength: 128
+          example: Demo Tenant CN
+        status:
+          $ref: '#/components/schemas/TenantStatus'
+        contactEmail:
+          type: string
+          format: email
+          example: platform@example.com
+        description:
+          type: string
+          maxLength: 500
+          example: suspended for abuse review
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: 当 `status` 变更为 destructive 状态时必填的审计原因。
+          example: suspended for abuse review
+    PatchTenantPolicyRequest:
+      type: object
+      properties:
+        maxStorageBytes:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 21474836480
+        maxFileCount:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 200000
+        maxSingleFileSize:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 4294967296
+        allowedMimeTypes:
+          type: array
+          items:
+            type: string
+        allowedExtensions:
+          type: array
+          items:
+            type: string
+        defaultAccessLevel:
+          $ref: '#/components/schemas/AccessLevel'
+        autoCreateEnabled:
+          type: boolean
+          example: false
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: 当策略收紧属于 destructive operation 时必填的审计原因。
+          example: tighten upload policy after abuse spikes
+    DeleteFileRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: destructive operation 的审计原因。
+          example: manual cleanup for abuse case
+    DeleteFileResult:
+      type: object
+      required:
+        - fileId
+        - status
+        - deletedAt
+        - physicalDeleteScheduled
+      properties:
+        fileId:
+          type: string
+          example: 01JPACWQ6A9Y0MST6FZFSGC4Y1
+        status:
+          $ref: '#/components/schemas/FileStatus'
+        deletedAt:
+          type: string
+          format: date-time
+          example: '2026-03-21T10:20:00Z'
+        physicalDeleteScheduled:
+          type: boolean
+          example: true
+    TenantResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPAEXVSMV1Q4PNH5N1TTRR2R
+        data:
+          $ref: '#/components/schemas/Tenant'
+    TenantPolicyResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPAF0KVRBKGDBRC0D6VHY2CA
+        data:
+          $ref: '#/components/schemas/TenantPolicy'
+    TenantUsageResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPAF4YMEQW0YJ3VQ5G6RRVPW
+        data:
+          $ref: '#/components/schemas/TenantUsage'
+    TenantListResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPAESVDD3WN8M91D6NWH7QMR
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tenant'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+    AdminFileResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPAF7ZDJQH2PQWJ1T6W9G7DK
+        data:
+          $ref: '#/components/schemas/AdminFile'
+    AdminFileListResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPAF69T1PG3SB2P4WJM3JTNX
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminFile'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+    DeleteFileResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPAF9M8KSM7MWEYB6P2R2G0Z
+        data:
+          $ref: '#/components/schemas/DeleteFileResult'
+    AuditLogListResponse:
+      type: object
+      required:
+        - requestId
+        - data
+      properties:
+        requestId:
+          type: string
+          example: 01JPAFB5Y1YHKJ5Z8WV5Z60Y4Q
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLog'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+    ErrorDetail:
+      type: object
+      additionalProperties: true
+      description: 结构化错误详情，字段规范以错误码注册表为准。
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: TENANT_NOT_FOUND
+        message:
+          type: string
+          example: tenant not found
+        details:
+          $ref: '#/components/schemas/ErrorDetail'
+    ErrorResponse:
+      type: object
+      required:
+        - requestId
+        - error
+      properties:
+        requestId:
+          type: string
+          example: 01JPAFDM0FCP47D9V59Q8KAZ3Q
+        error:
+          $ref: '#/components/schemas/Error'

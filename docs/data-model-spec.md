@@ -90,7 +90,7 @@
 因此：
 
 - 上传过程放到 `upload_sessions`
-- 分片进度放到 `upload_session_parts`
+- 分片观察快照、审计信息与幂等辅助数据放到 `upload_session_parts`
 - 完成上传后才产生 `file_assets`
 
 ### 3.3 控制面和统计面分离
@@ -420,7 +420,7 @@
 
 用途：
 
-- 保存 multipart 已确认分片
+- 保存服务侧观察到的 multipart 已确认分片快照
 
 建议字段：
 
@@ -444,7 +444,8 @@
 说明：
 
 - `completed_parts` 是 `upload_sessions` 的聚合快照
-- `upload_session_parts` 才是 authoritative part list
+- 对象存储 `list parts` 才是 authoritative part list
+- `upload_session_parts` 只保存服务侧观察值、审计信息和幂等辅助数据，不替代 provider 真相
 
 ## 5.8 `upload.upload_dedup_claims`
 
@@ -604,12 +605,20 @@
 
 ## 8. 事务与写入建议
 
-### 8.1 上传完成事务
+### 8.1 上传完成写事务
 
-`upload-service` 在 `complete` 流程中建议单事务完成：
+`upload-service` 的 `complete` 流程固定为三阶段：
 
-1. 锁定 `upload_sessions`
-2. 校验 `upload_session_parts`
+1. 阶段 A：短事务获取 `complete` 所有权
+2. 阶段 B：事务外读取 provider authoritative parts / object 事实并完成对象侧动作
+3. 阶段 C：短事务提交元数据
+
+这里的数据库事务只覆盖阶段 C，必须避免把对象存储 complete / head 之类的外部 I/O 放进锁区间。
+
+阶段 C 事务内建议执行：
+
+1. 再次锁定 `upload_sessions` 并确认 `completion_token`
+2. 校验阶段 B 已确认的对象事实与当前 session 仍一致，必要时对齐 `upload_session_parts`
 3. 插入 `file.blob_objects` 或复用已有对象
 4. 插入 `file.file_assets`
 5. 更新 `tenant.tenant_usage`

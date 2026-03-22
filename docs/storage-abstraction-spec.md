@@ -15,6 +15,7 @@
 - [architecture-upgrade-design.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/architecture-upgrade-design.md)
 - [data-model-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/data-model-spec.md)
 - [upload-session-state-machine-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/upload-session-state-machine-spec.md)
+- [data-protection-recovery-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/data-protection-recovery-spec.md)
 
 ## 2. 关键结论
 
@@ -66,7 +67,7 @@ Go 版以 S3 协议为主抽象，兼容：
 - 单对象 delete
 - part presign
 - object put presign
-- 兼容场景下的服务端 `uploadPart`
+- 受控代理上传场景下的服务端 `uploadPart`
 
 ### 3.2 `access-service`
 
@@ -261,7 +262,7 @@ type MultipartManager interface {
 
 说明：
 
-- `UploadPart` 不是前台默认路径，但为了兼容 `/api/v1/multipart/*` 仍保留
+- `UploadPart` 不是前台默认路径，只用于受控代理上传或后台特殊任务
 - `ListUploadedParts` 必须返回 authoritative parts，不能依赖本地缓存
 
 ## 5.7 `PresignManager`
@@ -407,15 +408,15 @@ im/2026/03/21/user-101/images/01HZZXYZ123-avatar.png
 
 ## 9.3 multipart upload part
 
-兼容两种模式：
+支持两种模式：
 
 1. 客户端拿 presigned part URL 直接上传
-2. 兼容接口通过 `upload-service` 中转分片
+2. 受控场景下由 `upload-service` 中转分片
 
 默认推荐是：
 
 - 前台大文件优先 presigned part
-- 服务端中转仅用于兼容接口和低并发场景
+- 服务端中转仅用于后台、低并发或受控网络环境
 
 ## 9.4 multipart list parts
 

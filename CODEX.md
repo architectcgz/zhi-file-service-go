@@ -20,17 +20,17 @@
 - 旧系统仍在测试阶段
 - 可以完全重写 canonical schema
 - 需要覆盖租户管理、管理员 API、上传与访问全链路
-- 需要尽量保持外部 API 语义兼容
+- 后续所有服务与调用方统一切到新 API
 
 优先级排序固定为：
 
 1. 性能与吞吐
 2. 可维护性
 3. 云原生伸缩与稳定性
-4. 外部 API 与功能兼容
+4. 新 API 契约统一与 OpenAPI 化
 
-如果某个实现同时满足“兼容”和“性能”，优先选两者都满足的方案。
-如果必须取舍，不能为了表面兼容把内部架构重新做回单体泥球。
+如果某个实现同时满足“性能”和“API 清晰度”，优先选择两者都更好的方案。
+不要为了照顾历史路径，把新的 canonical API 重新做成延续旧泥球的外壳。
 
 ## 2. 开工前必读
 
@@ -39,19 +39,47 @@
 1. `docs/README.md`
 2. `docs/architecture-upgrade-design.md`
 3. `docs/architecture-style-decision.md`
-4. `docs/data-model-spec.md`
-5. `docs/service-layout-spec.md`
-6. `docs/storage-abstraction-spec.md`
-7. `docs/upload-session-state-machine-spec.md`
-8. `docs/code-style-guide.md`
+4. `docs/api-design-spec.md`
+5. `docs/openapi-contract-spec.md`
+6. `docs/data-plane-auth-context-spec.md`
+7. `docs/error-code-registry.md`
+8. `docs/configuration-registry-spec.md`
+9. `docs/data-model-spec.md`
+10. `docs/data-protection-recovery-spec.md`
+11. `docs/service-layout-spec.md`
+12. `docs/storage-abstraction-spec.md`
+13. `docs/upload-session-state-machine-spec.md`
+14. `docs/code-style-guide.md`
+15. `docs/migration-bootstrap-spec.md`
+16. `docs/test-validation-spec.md`
+17. `docs/deployment-runtime-spec.md`
+18. `docs/development-workflow-spec.md`
+
+实施计划文件统一放在仓库根目录 `.planning/`：
+
+- 每个模块一个目录
+- 每个目录固定使用 `task_plan.md`、`findings.md`、`progress.md`
+- 不要把实施计划重新写回 `docs/`、仓库根目录或任意临时文件
+
+如果改动落在具体服务内，还必须额外读取对应文档：
+
+- `upload-service`: `docs/upload-service-implementation-spec.md`、`docs/upload-integrity-hash-spec.md`、`docs/outbox-event-spec.md`
+- `access-service`: `docs/access-service-implementation-spec.md`
+- `admin-service`: `docs/admin-service-implementation-spec.md`、`docs/admin-auth-spec.md`、`docs/outbox-event-spec.md`
+- `job-service`: `docs/job-service-implementation-spec.md`、`docs/outbox-event-spec.md`
 
 如果你的改动会影响：
 
 - 服务拆分
 - 表结构
-- API 兼容策略
+- API 设计契约
+- OpenAPI 正式契约
 - 存储抽象
+- 配置注册表
+- 数据保护与恢复策略
 - 代码风格约束
+- 本地开发启动方式
+- Makefile / scripts / CI 命令面
 
 那么你必须同步更新相应文档，不能只改代码不改设计。
 
@@ -264,8 +292,9 @@ transport/http -> app -> domain
 必须具备：
 
 - 无状态副本
-- readiness / liveness
-- metrics
+- `GET /ready`
+- `GET /live`
+- `GET /metrics`
 - trace
 - structured log
 - 配置外置化
@@ -282,18 +311,31 @@ transport/http -> app -> domain
 
 不要为了快速落地牺牲可观测性，否则后续 Grafana / Loki / Tempo 会迅速失控。
 
-## 10. API 与兼容性约束
+对 `job-service` 额外强制要求：
 
-本项目对外目标是“语义兼容”，不是“内部实现兼容”。
+- 多实例 cleanup / repair / reconcile 任务必须使用分布式锁
+- `FOR UPDATE SKIP LOCKED` 只能用于任务领取，不能替代分布式锁
+
+## 10. API 契约约束
+
+本项目对外目标是定义并收敛到一套新的 canonical API。
 
 这意味着：
 
-- 尽量保持现有 HTTP 路径、header、错误码语义
-- 可以重写内部表结构
-- 可以重写内部领域模型
-- 可以重写服务边界和代码结构
+- 新 API 才是外部唯一契约
+- 不再以旧 `file-service` 路径作为设计边界
+- 后续完整字段级文档以 OpenAPI 为准
+- 内部表结构、领域模型、服务边界都可以围绕新 API 重构
 
-不要为了和旧实现“一模一样”而保留明显不合理的内部设计。
+必须遵守：
+
+- 数据面路径统一在 `/api/v1`
+- 控制面路径统一在 `/api/admin/v1`
+- 上传入口统一围绕 `upload-sessions`
+- 除 `GET /api/v1/access-tickets/{ticket}/redirect` 外，数据面 north-south API 统一要求 Bearer Token
+- `PUBLIC` 文件的匿名访问只发生在最终 public URL 或 ticket redirect 落点，不发生在 `/api/v1/files/*`
+- 不长期维护 old/new 两套 north-south API
+- 不新增未经批准的 legacy alias 路径
 
 ## 11. 禁止事项
 
@@ -303,7 +345,7 @@ transport/http -> app -> domain
 - 为了 DDD 而 DDD
 - 为了 CQRS 而 CQRS
 - 为了抽象而抽象
-- 为了兼容而保留旧泥球结构
+- 为了照顾历史路径而保留旧泥球结构
 - 在热路径引入额外同步 RPC
 - 在 repository 里推进状态机
 - 在 handler 里拼业务

@@ -20,16 +20,17 @@
 - `DIRECT`
 - `PRESIGNED_SINGLE`
 
-统一覆盖以下协议入口：
+统一覆盖以下新 API 入口：
 
-- `/api/v1/upload/*`
-- `/api/v1/multipart/*`
-- `/api/v1/direct-upload/*`
-- `/api/v1/upload-sessions*`
+- `POST /api/v1/upload-sessions`
+- `PUT /api/v1/upload-sessions/{uploadSessionId}/content`
+- `POST /api/v1/upload-sessions/{uploadSessionId}/parts/presign`
+- `POST /api/v1/upload-sessions/{uploadSessionId}/complete`
+- `POST /api/v1/upload-sessions/{uploadSessionId}/abort`
 
 设计原则是：
 
-- 外部协议可以不同
+- 外部 north-south 入口统一收敛到 `upload-sessions` 资源路径
 - 内部状态机必须统一
 
 ## 3. UploadSession 的职责边界
@@ -67,7 +68,8 @@
 
 含义：
 
-- 服务端创建 multipart upload，上游客户端直接将分片发送给对象存储，或在兼容场景下通过服务端中转分片
+- 服务端创建 multipart upload，并签发 part 级 presigned URL
+- 上游客户端将分片直接发送给对象存储，服务只观察 authoritative part 结果
 
 特点：
 
@@ -112,7 +114,7 @@
 
 - `INLINE` 创建后尚未开始写对象
 - `PRESIGNED_SINGLE` 已生成对象 key，但客户端尚未上传
-- `DIRECT` 在部分兼容路径里也可从该状态开始
+- `DIRECT` 已创建 multipart upload，但尚未观察到任何已上传分片
 
 ### 5.2 `UPLOADING`
 
@@ -172,7 +174,7 @@
 性质：
 
 - 终态
-- 由 `job-service` 或惰性过期检查推进到该状态
+- 由请求路径上的惰性过期判定与 `job-service` 后台清理共同收敛到该状态
 
 ### 5.7 `FAILED`
 
@@ -231,7 +233,7 @@ INITIATED / UPLOADING / COMPLETING
 - `IssueSingleUploadUrl`
 - `IssuePartUploadUrls`
 - `UploadInlineBytes`
-- `UploadPart`
+- `ObserveUploadedParts`
 - `GetProgress`
 - `CompleteSingleUpload`
 - `CompleteMultipartUpload`
@@ -258,7 +260,7 @@ INITIATED / UPLOADING / COMPLETING
 | 当前状态 | 命令 | 条件 | 下一状态 | 说明 |
 |------|------|------|------|------|
 | 不存在 | `CreateSession` | `INLINE` | `INITIATED` | 尚未写入对象 |
-| 不存在 | `CreateSession` | `DIRECT` | `UPLOADING` | 已创建 multipart upload |
+| 不存在 | `CreateSession` | `DIRECT` | `INITIATED` | 已创建 multipart upload 并持久化 `provider_upload_id` |
 | 不存在 | `CreateSession` | `PRESIGNED_SINGLE` | `INITIATED` | 已生成 object key |
 | 不存在 | `CreateSession` | 命中秒传 | `COMPLETED` | 直接复用现有 blob 并创建 file asset |
 
@@ -267,10 +269,10 @@ INITIATED / UPLOADING / COMPLETING
 | 当前状态 | 命令 | 条件 | 下一状态 | 说明 |
 |------|------|------|------|------|
 | `INITIATED` | `UploadInlineBytes` | `INLINE` | `UPLOADING` | 服务端开始接收内容 |
-| `INITIATED` | `UploadPart` | `DIRECT` | `UPLOADING` | 已有 multipart context |
+| `INITIATED` | `ObserveUploadedParts` | `DIRECT` 且已观察到至少一个 authoritative part | `UPLOADING` | multipart 上下文已被客户端实际使用 |
 | `INITIATED` | `IssueSingleUploadUrl` | `PRESIGNED_SINGLE` | `INITIATED` | 签发 URL 不改变状态 |
 | `INITIATED` | `IssuePartUploadUrls` | `DIRECT` | `INITIATED` | 签发 URL 不改变状态 |
-| `UPLOADING` | `UploadPart` | `DIRECT` | `UPLOADING` | 幂等留在原状态 |
+| `UPLOADING` | `ObserveUploadedParts` | `DIRECT` | `UPLOADING` | 刷新已上传分片观察值 |
 | `UPLOADING` | `UploadInlineBytes` | `INLINE` | `UPLOADING` | 幂等留在原状态 |
 
 ### 8.3 完成上传
@@ -328,17 +330,14 @@ INITIATED / UPLOADING / COMPLETING
 - 必须有 `provider_upload_id`
 - 必须有 `object_key`
 - `total_parts >= 1`
-- `upload_session_parts` 是权威分片记录
+- 对象存储 authoritative list parts 是权威来源
+- `upload_session_parts` 只保存观察值、审计信息和幂等辅助数据
 
 推荐状态路径：
 
-`UPLOADING -> COMPLETING -> COMPLETED`
-
-也允许：
-
 `INITIATED -> UPLOADING -> COMPLETING -> COMPLETED`
 
-用于兼容某些先建会话后再建 multipart context 的实现。
+用于支持先建会话、先签发 presign、再在观察到分片后进入 `UPLOADING`。
 
 ### 9.3 `PRESIGNED_SINGLE`
 
@@ -433,20 +432,20 @@ INITIATED / UPLOADING / COMPLETING
 
 ### 12.1 过期判定
 
-会话满足以下条件之一可视为过期：
+会话同时满足以下条件时可视为过期：
 
 - `now > expires_at`
-- 状态不是终态
+- 当前状态仍不是终态
 
 ### 12.2 过期推进
 
-允许两种推进方式：
+必须同时具备两层推进：
 
 1. 惰性推进
-在读取或操作时发现过期，直接按 `EXPIRED` 处理
+在读取或操作时发现会话已过期，当前请求必须按 `EXPIRED` 语义拒绝继续上传或 complete
 
 2. 后台推进
-`job-service` 定时扫描活跃会话并执行过期清理
+`job-service` 定时扫描“未终态且超过 `expires_at`”的会话，推进状态并执行清理副作用
 
 ### 12.3 过期副作用
 
