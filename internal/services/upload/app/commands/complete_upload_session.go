@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 )
 
 const uploadSessionCompletedEventType = "upload.session.completed.v1"
+const uploadSessionFailedEventType = "upload.session.failed.v1"
 
 type CompleteUploadSessionCommand struct {
 	UploadSessionID string
@@ -60,6 +62,16 @@ type uploadSessionCompletedPayload struct {
 	HashAlgorithm string    `json:"hashAlgorithm,omitempty"`
 	HashValue     string    `json:"hashValue,omitempty"`
 	SizeBytes     int64     `json:"sizeBytes"`
+}
+
+type uploadSessionFailedPayload struct {
+	OccurredAt      time.Time `json:"occurredAt"`
+	RequestID       string    `json:"requestId,omitempty"`
+	TenantID        string    `json:"tenantId"`
+	Producer        string    `json:"producer"`
+	UploadSessionID string    `json:"uploadSessionId"`
+	FailureCode     string    `json:"failureCode"`
+	FailureMessage  string    `json:"failureMessage"`
 }
 
 func NewCompleteUploadSessionHandler(
@@ -175,6 +187,9 @@ func (h CompleteUploadSessionHandler) Handle(ctx context.Context, command Comple
 
 	materialized, err := h.materialize(ctx, ownedSession, command)
 	if err != nil {
+		if finalizeErr := h.finalizeFailure(ctx, ownedSession, completionToken, command.RequestID, err); finalizeErr != nil {
+			return view.CompletedUploadSession{}, errors.Join(err, finalizeErr)
+		}
 		return view.CompletedUploadSession{}, err
 	}
 
@@ -406,6 +421,66 @@ func (h CompleteUploadSessionHandler) commit(
 	return result, nil
 }
 
+func (h CompleteUploadSessionHandler) finalizeFailure(
+	ctx context.Context,
+	session *domain.Session,
+	completionToken string,
+	requestID string,
+	cause error,
+) error {
+	if !isTerminalCompleteFailure(cause) {
+		return nil
+	}
+
+	return h.txm.WithinTransaction(ctx, func(txCtx context.Context) error {
+		ownedSession, err := h.sessions.ConfirmCompletionOwner(txCtx, session.TenantID, session.ID, completionToken)
+		if err != nil {
+			return err
+		}
+		if ownedSession == nil {
+			return domain.ErrUploadSessionNotFound(session.ID)
+		}
+		if ownedSession.Status == domain.SessionStatusCompleted || ownedSession.Status == domain.SessionStatusFailed {
+			return nil
+		}
+		if ownedSession.Status != domain.SessionStatusCompleting {
+			return nil
+		}
+
+		code := string(xerrors.CodeOf(cause))
+		if code == "" {
+			code = string(xerrors.CodeInternalError)
+		}
+		if err := ownedSession.MarkFailed(code, cause.Error(), h.clock.Now()); err != nil {
+			return err
+		}
+		if err := h.sessions.Save(txCtx, ownedSession); err != nil {
+			return err
+		}
+		if h.outbox == nil {
+			return nil
+		}
+
+		payload, err := json.Marshal(uploadSessionFailedPayload{
+			OccurredAt:      h.clock.Now(),
+			RequestID:       strings.TrimSpace(requestID),
+			TenantID:        ownedSession.TenantID,
+			Producer:        "upload-service",
+			UploadSessionID: ownedSession.ID,
+			FailureCode:     code,
+			FailureMessage:  cause.Error(),
+		})
+		if err != nil {
+			return xerrors.Wrap(xerrors.CodeInternalError, "marshal upload failed payload", err, nil)
+		}
+		return h.outbox.Enqueue(txCtx, ports.OutboxMessage{
+			EventType:   uploadSessionFailedEventType,
+			AggregateID: ownedSession.ID,
+			Payload:     payload,
+		})
+	})
+}
+
 func (h CompleteUploadSessionHandler) completionToken(idempotencyKey string) (string, error) {
 	if idempotencyKey != "" {
 		return idempotencyKey, nil
@@ -557,6 +632,15 @@ func hashString(hash *domain.ContentHash) string {
 		return ""
 	}
 	return hash.Value
+}
+
+func isTerminalCompleteFailure(err error) bool {
+	switch xerrors.CodeOf(err) {
+	case domain.CodeUploadHashMismatch, domain.CodeUploadHashUnsupported, domain.CodeUploadHashInvalid:
+		return true
+	default:
+		return false
+	}
 }
 
 type noopTxManager struct{}

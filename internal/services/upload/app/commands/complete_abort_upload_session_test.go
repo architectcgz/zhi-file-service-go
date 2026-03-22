@@ -422,6 +422,211 @@ func TestCompleteUploadSessionRejectsHashMismatch(t *testing.T) {
 	}
 }
 
+func TestCompleteUploadSessionMarksFailedAndEnqueuesFailureEventOnHashMismatch(t *testing.T) {
+	now := time.Date(2026, 3, 22, 18, 55, 0, 0, time.UTC)
+	startedAt := now.Add(-time.Minute)
+	session := mustNewSession(t, domain.CreateSessionParams{
+		ID:                  "upload-hash-failed-1",
+		TenantID:            "tenant-a",
+		OwnerID:             "user-1",
+		FileName:            "avatar.png",
+		ContentType:         "image/png",
+		SizeBytes:           9,
+		AccessLevel:         storage.AccessLevelPublic,
+		Mode:                domain.SessionModePresignedSingle,
+		Status:              domain.SessionStatusCompleting,
+		Object:              storage.ObjectRef{Provider: storage.ProviderS3, BucketName: "public-bucket", ObjectKey: "tenant-a/uploads/upload-hash-failed-1/avatar.png"},
+		Hash:                &domain.ContentHash{Algorithm: "SHA256", Value: validHash()},
+		CompletionToken:     "complete-hash-failed-1",
+		CompletionStartedAt: &startedAt,
+		CreatedAt:           now.Add(-2 * time.Minute),
+		UpdatedAt:           startedAt,
+		ExpiresAt:           now.Add(28 * time.Minute),
+	})
+	sessions := &stubCompleteSessionRepository{
+		session: session,
+		acquired: &ports.CompletionAcquireResult{
+			Session:   session,
+			Ownership: domain.CompletionOwnershipHeldByCaller,
+		},
+		confirmed: session,
+	}
+	outbox := &stubUploadOutboxPublisher{}
+	handler := commands.NewCompleteUploadSessionHandler(
+		sessions,
+		&stubSessionPartRepository{},
+		&stubBlobRepository{},
+		&stubFileRepository{},
+		&stubCompleteDedupRepository{},
+		&stubTenantUsageRepository{},
+		outbox,
+		&stubUploadTxManager{},
+		&stubCompleteMultipartManager{},
+		&stubObjectReader{
+			metadata: storage.ObjectMetadata{
+				SizeBytes:   9,
+				ContentType: "image/png",
+				ETag:        `"etag-single"`,
+				Checksum:    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			},
+		},
+		&stubSequenceIDGenerator{},
+		clock.NewFixed(now),
+	)
+
+	_, err := handler.Handle(context.Background(), commands.CompleteUploadSessionCommand{
+		UploadSessionID: "upload-hash-failed-1",
+		IdempotencyKey:  "complete-hash-failed-1",
+		RequestID:       "req-hash-failed-1",
+		Auth:            newUploadAuth(),
+	})
+	if code := xerrors.CodeOf(err); code != xerrors.Code("UPLOAD_HASH_MISMATCH") {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, xerrors.Code("UPLOAD_HASH_MISMATCH"), err)
+	}
+	if sessions.saved == nil || sessions.saved.Status != domain.SessionStatusFailed {
+		t.Fatalf("expected failed session to be saved, got %#v", sessions.saved)
+	}
+	if sessions.saved.FailureCode != "UPLOAD_HASH_MISMATCH" {
+		t.Fatalf("failure code = %q, want %q", sessions.saved.FailureCode, "UPLOAD_HASH_MISMATCH")
+	}
+	if outbox.message == nil {
+		t.Fatal("expected failed outbox message")
+	}
+	if outbox.message.EventType != "upload.session.failed.v1" {
+		t.Fatalf("event type = %q, want %q", outbox.message.EventType, "upload.session.failed.v1")
+	}
+	payload := decodeOutboxPayload(t, outbox.message.Payload)
+	if payload["failureCode"] != "UPLOAD_HASH_MISMATCH" {
+		t.Fatalf("unexpected outbox payload: %#v", payload)
+	}
+}
+
+func TestCompleteUploadSessionRetriesWhenCallerStillOwnsCompletion(t *testing.T) {
+	now := time.Date(2026, 3, 22, 18, 57, 0, 0, time.UTC)
+	startedAt := now.Add(-time.Minute)
+	session := mustNewSession(t, domain.CreateSessionParams{
+		ID:                  "upload-held-1",
+		TenantID:            "tenant-a",
+		OwnerID:             "user-1",
+		FileName:            "avatar.png",
+		ContentType:         "image/png",
+		SizeBytes:           9,
+		AccessLevel:         storage.AccessLevelPublic,
+		Mode:                domain.SessionModePresignedSingle,
+		Status:              domain.SessionStatusCompleting,
+		Object:              storage.ObjectRef{Provider: storage.ProviderS3, BucketName: "public-bucket", ObjectKey: "tenant-a/uploads/upload-held-1/avatar.png"},
+		Hash:                &domain.ContentHash{Algorithm: "SHA256", Value: validHash()},
+		CompletionToken:     "complete-held-1",
+		CompletionStartedAt: &startedAt,
+		CreatedAt:           now.Add(-2 * time.Minute),
+		UpdatedAt:           startedAt,
+		ExpiresAt:           now.Add(28 * time.Minute),
+	})
+	handler := commands.NewCompleteUploadSessionHandler(
+		&stubCompleteSessionRepository{
+			session: session,
+			acquired: &ports.CompletionAcquireResult{
+				Session:   session,
+				Ownership: domain.CompletionOwnershipHeldByCaller,
+			},
+			confirmed: session,
+		},
+		&stubSessionPartRepository{},
+		&stubBlobRepository{},
+		&stubFileRepository{},
+		&stubCompleteDedupRepository{},
+		&stubTenantUsageRepository{},
+		&stubUploadOutboxPublisher{},
+		&stubUploadTxManager{},
+		&stubCompleteMultipartManager{},
+		&stubObjectReader{
+			metadata: storage.ObjectMetadata{
+				SizeBytes:   9,
+				ContentType: "image/png",
+				ETag:        `"etag-single"`,
+				Checksum:    validHash(),
+			},
+		},
+		&stubSequenceIDGenerator{ids: []string{"blob-held-1", "file-held-1"}},
+		clock.NewFixed(now),
+	)
+
+	result, err := handler.Handle(context.Background(), commands.CompleteUploadSessionCommand{
+		UploadSessionID: "upload-held-1",
+		IdempotencyKey:  "complete-held-1",
+		Auth:            newUploadAuth(),
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if result.FileID != "file-held-1" {
+		t.Fatalf("file id = %q, want %q", result.FileID, "file-held-1")
+	}
+	if result.UploadSession.Status != domain.SessionStatusCompleted {
+		t.Fatalf("status = %s, want %s", result.UploadSession.Status, domain.SessionStatusCompleted)
+	}
+}
+
+func TestCompleteUploadSessionLeavesSessionCompletingOnTransientStorageError(t *testing.T) {
+	now := time.Date(2026, 3, 22, 18, 58, 0, 0, time.UTC)
+	session := mustNewSession(t, domain.CreateSessionParams{
+		ID:          "upload-transient-1",
+		TenantID:    "tenant-a",
+		OwnerID:     "user-1",
+		FileName:    "avatar.png",
+		ContentType: "image/png",
+		SizeBytes:   9,
+		AccessLevel: storage.AccessLevelPublic,
+		Mode:        domain.SessionModePresignedSingle,
+		Object:      storage.ObjectRef{Provider: storage.ProviderS3, BucketName: "public-bucket", ObjectKey: "tenant-a/uploads/upload-transient-1/avatar.png"},
+		Hash:        &domain.ContentHash{Algorithm: "SHA256", Value: validHash()},
+		CreatedAt:   now.Add(-2 * time.Minute),
+		UpdatedAt:   now.Add(-time.Minute),
+		ExpiresAt:   now.Add(28 * time.Minute),
+	})
+	sessions := &stubCompleteSessionRepository{
+		session: session,
+		acquired: &ports.CompletionAcquireResult{
+			Session:   session,
+			Ownership: domain.CompletionOwnershipAcquired,
+		},
+		confirmed: session,
+	}
+	outbox := &stubUploadOutboxPublisher{}
+	handler := commands.NewCompleteUploadSessionHandler(
+		sessions,
+		&stubSessionPartRepository{},
+		&stubBlobRepository{},
+		&stubFileRepository{},
+		&stubCompleteDedupRepository{},
+		&stubTenantUsageRepository{},
+		outbox,
+		&stubUploadTxManager{},
+		&stubCompleteMultipartManager{},
+		&stubObjectReader{err: errors.New("object storage unavailable")},
+		&stubSequenceIDGenerator{},
+		clock.NewFixed(now),
+	)
+
+	_, err := handler.Handle(context.Background(), commands.CompleteUploadSessionCommand{
+		UploadSessionID: "upload-transient-1",
+		IdempotencyKey:  "complete-transient-1",
+		Auth:            newUploadAuth(),
+	})
+	if code := xerrors.CodeOf(err); code != xerrors.CodeServiceUnavailable {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, xerrors.CodeServiceUnavailable, err)
+	}
+	if sessions.saved != nil {
+		t.Fatalf("expected no failed save on transient error, got %#v", sessions.saved)
+	}
+	if outbox.message != nil {
+		t.Fatalf("expected no outbox message on transient error, got %#v", outbox.message)
+	}
+	if session.Status != domain.SessionStatusCompleting {
+		t.Fatalf("status = %s, want %s", session.Status, domain.SessionStatusCompleting)
+	}
+}
+
 func TestAbortUploadSessionMarksSessionAborted(t *testing.T) {
 	now := time.Date(2026, 3, 22, 19, 0, 0, 0, time.UTC)
 	session := mustNewSession(t, domain.CreateSessionParams{

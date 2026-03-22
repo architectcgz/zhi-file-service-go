@@ -107,6 +107,52 @@ func TestSessionAbortRejectsCompletedSession(t *testing.T) {
 	}
 }
 
+func TestSessionAbortIsIdempotentForFailedAndExpired(t *testing.T) {
+	tests := []struct {
+		name   string
+		status SessionStatus
+		setup  func(CreateSessionParams) CreateSessionParams
+	}{
+		{
+			name:   "failed",
+			status: SessionStatusFailed,
+			setup: func(params CreateSessionParams) CreateSessionParams {
+				failedAt := params.CreatedAt.Add(time.Minute)
+				params.Status = SessionStatusFailed
+				params.FailedAt = &failedAt
+				params.FailureCode = "UPLOAD_HASH_MISMATCH"
+				params.FailureMessage = "declared hash does not match verified hash"
+				return params
+			},
+		},
+		{
+			name:   "expired",
+			status: SessionStatusExpired,
+			setup: func(params CreateSessionParams) CreateSessionParams {
+				params.Status = SessionStatusExpired
+				return params
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params := tt.setup(validSessionParams(SessionModeInline))
+			session, err := NewSession(params)
+			if err != nil {
+				t.Fatalf("NewSession returned error: %v", err)
+			}
+
+			if err := session.Abort(params.CreatedAt.Add(2 * time.Minute)); err != nil {
+				t.Fatalf("Abort() error = %v", err)
+			}
+			if session.Status != tt.status {
+				t.Fatalf("status = %s, want %s", session.Status, tt.status)
+			}
+		})
+	}
+}
+
 func TestSessionAcquireCompletionDistinguishesOwnerStates(t *testing.T) {
 	params := validSessionParams(SessionModeInline)
 	session, err := NewSession(params)
