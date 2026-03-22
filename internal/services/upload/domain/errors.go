@@ -3,11 +3,12 @@ package domain
 import "github.com/architectcgz/zhi-file-service-go/pkg/xerrors"
 
 const (
-	CodeUploadModeInvalid          xerrors.Code = "UPLOAD_MODE_INVALID"
-	CodeUploadHashRequired         xerrors.Code = "UPLOAD_HASH_REQUIRED"
-	CodeUploadHashInvalid          xerrors.Code = "UPLOAD_HASH_INVALID"
-	CodeUploadHashUnsupported      xerrors.Code = "UPLOAD_HASH_UNSUPPORTED"
-	CodeUploadSessionStateConflict xerrors.Code = "UPLOAD_SESSION_STATE_CONFLICT"
+	CodeUploadModeInvalid                xerrors.Code = "UPLOAD_MODE_INVALID"
+	CodeUploadHashRequired               xerrors.Code = "UPLOAD_HASH_REQUIRED"
+	CodeUploadHashInvalid                xerrors.Code = "UPLOAD_HASH_INVALID"
+	CodeUploadHashUnsupported            xerrors.Code = "UPLOAD_HASH_UNSUPPORTED"
+	CodeUploadCompletionOwnershipInvalid xerrors.Code = "UPLOAD_COMPLETION_OWNERSHIP_INVALID"
+	CodeUploadSessionStateConflict       xerrors.Code = "UPLOAD_SESSION_STATE_CONFLICT"
 )
 
 func errUploadModeInvalid(current SessionMode) error {
@@ -33,6 +34,12 @@ func errUploadHashUnsupported(algorithm string) error {
 	return xerrors.New(CodeUploadHashUnsupported, "content hash algorithm is unsupported", xerrors.Details{
 		"field":     "contentHash.algorithm",
 		"algorithm": algorithm,
+	})
+}
+
+func errUploadCompletionOwnershipInvalid(message string) error {
+	return xerrors.New(CodeUploadCompletionOwnershipInvalid, message, xerrors.Details{
+		"field": "completion",
 	})
 }
 
