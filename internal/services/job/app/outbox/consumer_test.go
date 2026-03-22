@@ -101,10 +101,10 @@ func TestConsumerMarksFailedWhenNoHandlerIsRegistered(t *testing.T) {
 }
 
 type stubOutboxReader struct {
-	events      []ports.OutboxEvent
-	claimQuery  ports.ClaimOutboxEventsQuery
-	published   []string
-	failed      []failedOutboxEvent
+	events     []ports.OutboxEvent
+	claimQuery ports.ClaimOutboxEventsQuery
+	published  []string
+	failed     []failedOutboxEvent
 }
 
 type failedOutboxEvent struct {

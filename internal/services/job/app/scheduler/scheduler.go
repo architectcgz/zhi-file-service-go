@@ -8,22 +8,24 @@ import (
 	"time"
 
 	"github.com/architectcgz/zhi-file-service-go/internal/services/job/app/jobs"
+	"github.com/architectcgz/zhi-file-service-go/internal/services/job/app/observability"
 	"github.com/architectcgz/zhi-file-service-go/internal/services/job/ports"
 )
 
 type Worker interface {
-	Execute(ctx context.Context, job jobs.Job) error
+	Execute(ctx context.Context, job jobs.Job) (jobs.Result, error)
 }
 
 type InlineWorker struct{}
 
-func (InlineWorker) Execute(ctx context.Context, job jobs.Job) error {
-	return job.Execute(ctx)
+func (InlineWorker) Execute(ctx context.Context, job jobs.Job) (jobs.Result, error) {
+	return jobs.Execute(ctx, job)
 }
 
 type Config struct {
 	LockTTL       time.Duration
 	RenewInterval time.Duration
+	Observer      *observability.Observer
 }
 
 type RunResult struct {
@@ -66,14 +68,17 @@ func (s Scheduler) RunOnce(ctx context.Context, job jobs.Job, cfg Config) (RunRe
 
 	handle, acquired, err := s.locker.Acquire(ctx, lockKey(job.Name()), cfg.LockTTL)
 	if err != nil {
+		cfg.Observer.RecordJobLockAcquireFailure(ctx, job.Name(), err)
 		return RunResult{}, err
 	}
 	if !acquired || handle == nil {
+		cfg.Observer.RecordJobLockAcquireFailure(ctx, job.Name(), nil)
 		return RunResult{}, nil
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	runCtx, finishObservation := cfg.Observer.StartJobRun(runCtx, job.Name())
 
 	done := make(chan struct{})
 	renewErrCh := make(chan error, 1)
@@ -99,7 +104,7 @@ func (s Scheduler) RunOnce(ctx context.Context, job jobs.Job, cfg Config) (RunRe
 		}
 	}()
 
-	execErr := s.worker.Execute(runCtx, job)
+	jobResult, execErr := s.worker.Execute(runCtx, job)
 	close(done)
 
 	select {
@@ -117,6 +122,13 @@ func (s Scheduler) RunOnce(ctx context.Context, job jobs.Job, cfg Config) (RunRe
 			execErr = fmt.Errorf("%w; release lock: %v", execErr, releaseErr)
 		}
 	}
+
+	finishObservation(observability.JobRun{
+		LockAcquired:   true,
+		ItemsProcessed: jobResult.ItemsProcessed,
+		RetryCount:     jobResult.RetryCount,
+		Error:          execErr,
+	})
 
 	return RunResult{
 		Acquired: true,

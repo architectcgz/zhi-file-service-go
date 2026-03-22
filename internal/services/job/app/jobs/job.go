@@ -10,6 +10,25 @@ type Job interface {
 	Execute(ctx context.Context) error
 }
 
+type Result struct {
+	ItemsProcessed int
+	RetryCount     int
+}
+
+type ResultJob interface {
+	Job
+	ExecuteWithResult(ctx context.Context) (Result, error)
+}
+
+func Execute(ctx context.Context, job Job) (Result, error) {
+	if resultJob, ok := job.(ResultJob); ok {
+		return resultJob.ExecuteWithResult(ctx)
+	}
+
+	err := job.Execute(ctx)
+	return Result{}, err
+}
+
 type Func struct {
 	JobName string
 	Run     func(context.Context) error

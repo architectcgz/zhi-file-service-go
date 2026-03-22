@@ -47,6 +47,11 @@ func (j FinalizeFileDeleteJob) Name() string {
 }
 
 func (j FinalizeFileDeleteJob) Execute(ctx context.Context) error {
-	_, err := j.repo.FinalizeDeletedFiles(ctx, j.clock.Now().Add(-j.retention), j.batchSize)
+	_, err := j.ExecuteWithResult(ctx)
 	return err
+}
+
+func (j FinalizeFileDeleteJob) ExecuteWithResult(ctx context.Context) (Result, error) {
+	processed, err := j.repo.FinalizeDeletedFiles(ctx, j.clock.Now().Add(-j.retention), j.batchSize)
+	return Result{ItemsProcessed: processed}, err
 }

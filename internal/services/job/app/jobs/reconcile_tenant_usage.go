@@ -32,6 +32,11 @@ func (j ReconcileTenantUsageJob) Name() string {
 }
 
 func (j ReconcileTenantUsageJob) Execute(ctx context.Context) error {
-	_, err := j.repo.ReconcileTenantUsage(ctx, j.batchSize)
+	_, err := j.ExecuteWithResult(ctx)
 	return err
+}
+
+func (j ReconcileTenantUsageJob) ExecuteWithResult(ctx context.Context) (Result, error) {
+	processed, err := j.repo.ReconcileTenantUsage(ctx, j.batchSize)
+	return Result{ItemsProcessed: processed}, err
 }

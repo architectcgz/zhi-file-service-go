@@ -146,17 +146,18 @@ func TestRunOnceReturnsRenewError(t *testing.T) {
 }
 
 type stubWorker struct {
-	calls int
-	run   func(context.Context, jobs.Job) error
+	calls  int
+	result jobs.Result
+	run    func(context.Context, jobs.Job) error
 }
 
-func (s *stubWorker) Execute(ctx context.Context, job jobs.Job) error {
+func (s *stubWorker) Execute(ctx context.Context, job jobs.Job) (jobs.Result, error) {
 	s.calls++
 	if s.run != nil {
-		return s.run(ctx, job)
+		return jobs.Result{}, s.run(ctx, job)
 	}
 
-	return nil
+	return s.result, nil
 }
 
 type stubLocker struct {

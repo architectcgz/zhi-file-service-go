@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/architectcgz/zhi-file-service-go/internal/services/job/app/observability"
 	"github.com/architectcgz/zhi-file-service-go/internal/services/job/ports"
 	"github.com/architectcgz/zhi-file-service-go/pkg/clock"
 )
@@ -25,6 +26,7 @@ type Config struct {
 	EventTypes      []string
 	RetryBackoff    time.Duration
 	MaxRetryBackoff time.Duration
+	Observer        *observability.Observer
 }
 
 type Result struct {
@@ -41,6 +43,7 @@ type Consumer struct {
 	eventTypes      []string
 	retryBackoff    time.Duration
 	maxRetryBackoff time.Duration
+	observer        *observability.Observer
 }
 
 func NewConsumer(
@@ -79,45 +82,83 @@ func NewConsumer(
 		eventTypes:      normalizeEventTypes(cfg.EventTypes),
 		retryBackoff:    cfg.RetryBackoff,
 		maxRetryBackoff: cfg.MaxRetryBackoff,
+		observer:        cfg.Observer,
 	}
 }
 
 func (c Consumer) RunOnce(ctx context.Context) (Result, error) {
+	ctx, finishObservation := c.observer.StartOutboxRun(ctx)
 	events, err := c.reader.ClaimPending(ctx, ports.ClaimOutboxEventsQuery{
 		EventTypes: c.eventTypes,
 		DueBefore:  c.clock.Now(),
 		Limit:      c.batchSize,
 	})
 	if err != nil {
+		finishObservation(observability.OutboxRun{
+			Error: err,
+		})
 		return Result{}, err
 	}
 
 	now := c.clock.Now()
 	result := Result{Claimed: len(events)}
+	var lastFailure error
 	for _, event := range events {
 		handler, ok := c.handlers[event.EventType]
 		if !ok {
 			if err := c.reader.MarkFailed(ctx, event.EventID, now.Add(c.retryDelay(event.RetryCount)), "no handler registered"); err != nil {
+				finishObservation(observability.OutboxRun{
+					Claimed:    result.Claimed,
+					Published:  result.Published,
+					Failed:     result.Failed,
+					RetryCount: result.Failed,
+					Error:      err,
+				})
 				return result, err
 			}
 			result.Failed++
+			lastFailure = fmt.Errorf("no handler registered")
+			c.observer.RecordOutboxRetry(ctx, event.EventID, event.EventType, event.RetryCount+1, lastFailure)
 			continue
 		}
 
 		if err := handler.Handle(ctx, event); err != nil {
 			if markErr := c.reader.MarkFailed(ctx, event.EventID, now.Add(c.retryDelay(event.RetryCount)), err.Error()); markErr != nil {
+				finishObservation(observability.OutboxRun{
+					Claimed:    result.Claimed,
+					Published:  result.Published,
+					Failed:     result.Failed,
+					RetryCount: result.Failed,
+					Error:      fmt.Errorf("handle outbox event: %w; mark failed: %v", err, markErr),
+				})
 				return result, fmt.Errorf("handle outbox event: %w; mark failed: %v", err, markErr)
 			}
 			result.Failed++
+			lastFailure = err
+			c.observer.RecordOutboxRetry(ctx, event.EventID, event.EventType, event.RetryCount+1, err)
 			continue
 		}
 
 		if err := c.reader.MarkPublished(ctx, event.EventID, now); err != nil {
+			finishObservation(observability.OutboxRun{
+				Claimed:    result.Claimed,
+				Published:  result.Published,
+				Failed:     result.Failed,
+				RetryCount: result.Failed,
+				Error:      err,
+			})
 			return result, err
 		}
 		result.Published++
 	}
 
+	finishObservation(observability.OutboxRun{
+		Claimed:    result.Claimed,
+		Published:  result.Published,
+		Failed:     result.Failed,
+		RetryCount: result.Failed,
+		Error:      lastFailure,
+	})
 	return result, nil
 }
 

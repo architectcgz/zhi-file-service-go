@@ -25,6 +25,14 @@ func (j ProcessOutboxEventsJob) Name() string {
 }
 
 func (j ProcessOutboxEventsJob) Execute(ctx context.Context) error {
-	_, err := j.consumer.RunOnce(ctx)
+	_, err := j.ExecuteWithResult(ctx)
 	return err
+}
+
+func (j ProcessOutboxEventsJob) ExecuteWithResult(ctx context.Context) (Result, error) {
+	result, err := j.consumer.RunOnce(ctx)
+	return Result{
+		ItemsProcessed: result.Claimed,
+		RetryCount:     result.Failed,
+	}, err
 }
