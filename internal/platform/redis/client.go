@@ -15,6 +15,10 @@ type Client struct {
 	raw *goredis.Client
 }
 
+func NewClient(raw *goredis.Client) *Client {
+	return &Client{raw: raw}
+}
+
 func Open(ctx context.Context, cfg config.RedisConfig, required bool, logger *slog.Logger) (*Client, error) {
 	if strings.TrimSpace(cfg.Addr) == "" {
 		if required {
