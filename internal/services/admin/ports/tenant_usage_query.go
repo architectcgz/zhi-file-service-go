@@ -6,12 +6,14 @@ import (
 )
 
 type TenantUsageView struct {
-	TenantID      string
-	StorageBytes  int64
-	FileCount     int64
-	UpdatedAt     time.Time
+	TenantID     string
+	StorageBytes int64
+	FileCount    int64
+	LastUploadAt *time.Time
+	UpdatedAt    time.Time
 }
 
-type TenantUsageQuery interface {
+type TenantUsageRepository interface {
+	Initialize(ctx context.Context, tenantID string) error
 	GetByTenantID(ctx context.Context, tenantID string) (*TenantUsageView, error)
 }

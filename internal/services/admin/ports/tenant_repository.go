@@ -7,9 +7,10 @@ import (
 )
 
 type ListTenantsQuery struct {
-	Cursor string
-	Limit  int
-	Status *domain.TenantStatus
+	Cursor       string
+	Limit        int
+	Status       *domain.TenantStatus
+	TenantScopes []string
 }
 
 type TenantRepository interface {
