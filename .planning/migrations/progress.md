@@ -2,9 +2,10 @@
 
 ## Status
 
-- `pending`
+- `completed`
 
 ## Notes
 
-- 尚未开始实现
-- 开工前需要先把 probe/config 规范和平台层入口确定
+- 已补 tenant/file/upload/audit/infra 五个 schema 的首版 canonical migration
+- 已补线性 migration runner、build 脚本与 seed 目录
+- 已执行 `go test ./...`，当前通过

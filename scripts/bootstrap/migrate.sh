@@ -1,31 +1,66 @@
 #!/usr/bin/env bash
-# 执行数据库 migration
-# 用法：migrate.sh [up|down|status]
-# 依赖：golang-migrate CLI（make deps 安装）
-# migration 文件位于 migrations/<schema>/ 按全局版本号线性排序执行
+# 执行数据库 migration（按 schema 目录维护，按全局版本扁平执行）
+# 用法：migrate.sh [build|up|down|status|reset] [down_steps]
 set -euo pipefail
 
-COMMAND="${1:-up}"
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+MIGRATIONS_ROOT="${MIGRATIONS_ROOT:-${ROOT_DIR}/migrations}"
+MIGRATE_BUILD_DIR="${MIGRATE_BUILD_DIR:-${ROOT_DIR}/.build/migrations/all}"
+MIGRATE_BUILD_SCRIPT="${MIGRATE_BUILD_SCRIPT:-${ROOT_DIR}/scripts/bootstrap/migrate-build.sh}"
+MIGRATE_BIN="${MIGRATE_BIN:-migrate}"
 DB_DSN="${DB_DSN:-postgres://zhi:zhi@localhost:5432/zhi_file_service?sslmode=disable}"
 
-# 汇总 migrations 目录下所有子目录的文件，按文件名全局版本号排序
-MIGRATION_DIR="$(cd "$(dirname "$0")/../.." && pwd)/migrations"
+COMMAND="${1:-up}"
+DOWN_STEPS="${2:-1}"
+APP_ENV="${APP_ENV:-local}"
 
-case "$COMMAND" in
+ensure_tool() {
+  if ! command -v "${MIGRATE_BIN}" >/dev/null 2>&1; then
+    echo "[ERROR] 未找到 migrate CLI: ${MIGRATE_BIN}" >&2
+    exit 1
+  fi
+}
+
+run_build() {
+  MIGRATIONS_ROOT="${MIGRATIONS_ROOT}" MIGRATE_BUILD_DIR="${MIGRATE_BUILD_DIR}" "${MIGRATE_BUILD_SCRIPT}"
+}
+
+run_migrate() {
+  ensure_tool
+  "${MIGRATE_BIN}" -path "${MIGRATE_BUILD_DIR}" -database "${DB_DSN}" "$@"
+}
+
+case "${COMMAND}" in
+  build)
+    run_build
+    ;;
   up)
+    run_build
     echo ">>> 执行 migration up..."
-    migrate -path "$MIGRATION_DIR" -database "$DB_DSN" up
+    run_migrate up
     ;;
   down)
-    echo ">>> 回滚最近一次 migration..."
-    migrate -path "$MIGRATION_DIR" -database "$DB_DSN" down 1
+    run_build
+    echo ">>> 回滚最近 ${DOWN_STEPS} 次 migration..."
+    run_migrate down "${DOWN_STEPS}"
     ;;
   status)
+    run_build
     echo ">>> 查看 migration 状态..."
-    migrate -path "$MIGRATION_DIR" -database "$DB_DSN" version
+    run_migrate version
+    ;;
+  reset)
+    if [ "${APP_ENV}" != "local" ] && [ "${APP_ENV}" != "dev" ] && [ "${APP_ENV}" != "test" ]; then
+      echo "[ERROR] migrate reset 仅允许 local/dev/test 环境执行，当前 APP_ENV=${APP_ENV}" >&2
+      exit 1
+    fi
+    run_build
+    echo ">>> 执行 migration reset（down all + up）..."
+    run_migrate down -all
+    run_migrate up
     ;;
   *)
-    echo "用法: migrate.sh [up|down|status]"
+    echo "用法: migrate.sh [build|up|down|status|reset] [down_steps]" >&2
     exit 1
     ;;
 esac
