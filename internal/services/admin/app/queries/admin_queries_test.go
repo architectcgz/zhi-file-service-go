@@ -74,6 +74,54 @@ func TestListTenantsPassesScopeStatusAndNormalizedLimit(t *testing.T) {
 	}
 }
 
+func TestListTenantsRejectsBlankCursor(t *testing.T) {
+	t.Parallel()
+
+	repo := &stubQueryTenantRepository{}
+	handler := queries.NewListTenantsHandler(repo, queries.ListTenantsConfig{})
+
+	_, err := handler.Handle(context.Background(), queries.ListTenantsQuery{
+		Cursor: "   ",
+		Auth:   mustQueryAdminContext(t, domain.RoleReadonly, "tenant-a"),
+	})
+	if code := xerrors.CodeOf(err); code != xerrors.CodeInvalidArgument {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, xerrors.CodeInvalidArgument, err)
+	}
+	if repo.listCalls != 0 {
+		t.Fatalf("listCalls = %d, want 0", repo.listCalls)
+	}
+}
+
+func TestListTenantsTrimsCursorAndUsesDefaultLimit(t *testing.T) {
+	t.Parallel()
+
+	status := domain.TenantStatusActive
+	repo := &stubQueryTenantRepository{
+		items: []domain.Tenant{
+			{TenantID: "tenant-a", TenantName: "Tenant A", Status: status},
+		},
+	}
+	handler := queries.NewListTenantsHandler(repo, queries.ListTenantsConfig{})
+
+	_, err := handler.Handle(context.Background(), queries.ListTenantsQuery{
+		Cursor: " cursor-1 ",
+		Limit:  0,
+		Auth:   mustQueryAdminContextWithScopes(t, domain.RoleReadonly, "tenant-a", "tenant-b"),
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if repo.listQuery.Cursor != "cursor-1" {
+		t.Fatalf("cursor = %q, want %q", repo.listQuery.Cursor, "cursor-1")
+	}
+	if repo.listQuery.Limit != 50 {
+		t.Fatalf("normalized limit = %d, want 50", repo.listQuery.Limit)
+	}
+	if len(repo.listQuery.TenantScopes) != 2 {
+		t.Fatalf("tenant scopes = %#v, want two scoped tenants", repo.listQuery.TenantScopes)
+	}
+}
+
 func TestGetTenantPolicyReturnsFlattenedPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -133,6 +181,56 @@ func TestGetTenantUsageReturnsUsageView(t *testing.T) {
 	}
 	if result.LastUploadAt == nil || !result.LastUploadAt.Equal(lastUpload) {
 		t.Fatalf("unexpected last upload time: %#v", result.LastUploadAt)
+	}
+}
+
+func TestGetTenantUsageClonesTimestampAndKeepsUsageSnapshot(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 3, 22, 13, 25, 0, 0, time.UTC)
+	lastUpload := now.Add(-5 * time.Minute)
+	repo := &stubQueryTenantUsageRepository{
+		usage: &ports.TenantUsageView{
+			TenantID:     "tenant-a",
+			StorageBytes: 4096,
+			FileCount:    7,
+			LastUploadAt: &lastUpload,
+			UpdatedAt:    now,
+		},
+	}
+	handler := queries.NewGetTenantUsageHandler(repo)
+
+	result, err := handler.Handle(context.Background(), queries.GetTenantUsageQuery{
+		TenantID: "tenant-a",
+		Auth:     mustQueryAdminContext(t, domain.RoleReadonly, "tenant-a"),
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	*result.LastUploadAt = result.LastUploadAt.Add(time.Hour)
+	if repo.usage.LastUploadAt == nil || !repo.usage.LastUploadAt.Equal(lastUpload) {
+		t.Fatalf("repository usage timestamp mutated: %#v", repo.usage.LastUploadAt)
+	}
+	if result.UsedStorageBytes != 4096 || result.UsedFileCount != 7 {
+		t.Fatalf("unexpected usage snapshot: %#v", result)
+	}
+}
+
+func TestGetTenantUsageRejectsTenantOutOfScope(t *testing.T) {
+	t.Parallel()
+
+	repo := &stubQueryTenantUsageRepository{}
+	handler := queries.NewGetTenantUsageHandler(repo)
+
+	_, err := handler.Handle(context.Background(), queries.GetTenantUsageQuery{
+		TenantID: "tenant-b",
+		Auth:     mustQueryAdminContext(t, domain.RoleReadonly, "tenant-a"),
+	})
+	if code := xerrors.CodeOf(err); code != domain.CodeTenantScopeDenied {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, domain.CodeTenantScopeDenied, err)
+	}
+	if repo.getCalls != 0 {
+		t.Fatalf("getCalls = %d, want 0", repo.getCalls)
 	}
 }
 
@@ -237,6 +335,24 @@ func TestListFilesUsesTenantScopeWithTenantFilterAndContractMaxLimit(t *testing.
 	}
 	if repo.listQuery.Limit != 200 {
 		t.Fatalf("normalized limit = %d, want 200", repo.listQuery.Limit)
+	}
+}
+
+func TestListFilesRejectsTenantOutOfScope(t *testing.T) {
+	t.Parallel()
+
+	repo := &stubAdminFileQueryRepository{}
+	handler := queries.NewListFilesHandler(repo, queries.ListFilesConfig{})
+
+	_, err := handler.Handle(context.Background(), queries.ListFilesQuery{
+		TenantID: "tenant-b",
+		Auth:     mustQueryAdminContext(t, domain.RoleReadonly, "tenant-a"),
+	})
+	if code := xerrors.CodeOf(err); code != domain.CodeTenantScopeDenied {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, domain.CodeTenantScopeDenied, err)
+	}
+	if repo.listCalls != 0 {
+		t.Fatalf("listCalls = %d, want 0", repo.listCalls)
 	}
 }
 
@@ -359,6 +475,24 @@ func TestListAuditLogsUsesTenantScopeWithTenantFilterAndContractMaxLimit(t *test
 	}
 }
 
+func TestListAuditLogsRejectsTenantOutOfScope(t *testing.T) {
+	t.Parallel()
+
+	repo := &stubAuditLogQueryRepository{}
+	handler := queries.NewListAuditLogsHandler(repo, queries.ListAuditLogsConfig{})
+
+	_, err := handler.Handle(context.Background(), queries.ListAuditLogsQuery{
+		TenantID: "tenant-b",
+		Auth:     mustQueryAdminContext(t, domain.RoleReadonly, "tenant-a"),
+	})
+	if code := xerrors.CodeOf(err); code != domain.CodeTenantScopeDenied {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, domain.CodeTenantScopeDenied, err)
+	}
+	if repo.listCalls != 0 {
+		t.Fatalf("listCalls = %d, want 0", repo.listCalls)
+	}
+}
+
 func TestListAuditLogsRejectsBlankOptionalQueryParameters(t *testing.T) {
 	t.Parallel()
 
@@ -406,6 +540,7 @@ type stubQueryTenantRepository struct {
 	items      []domain.Tenant
 	nextCursor string
 	listQuery  ports.ListTenantsQuery
+	listCalls  int
 }
 
 func (s *stubQueryTenantRepository) Create(context.Context, domain.Tenant) error {
@@ -417,6 +552,7 @@ func (s *stubQueryTenantRepository) GetByID(context.Context, string) (*domain.Te
 }
 
 func (s *stubQueryTenantRepository) List(_ context.Context, query ports.ListTenantsQuery) ([]domain.Tenant, string, error) {
+	s.listCalls++
 	s.listQuery = query
 	return s.items, s.nextCursor, s.err
 }
@@ -443,8 +579,9 @@ func (s *stubQueryTenantPolicyRepository) Patch(context.Context, string, domain.
 }
 
 type stubQueryTenantUsageRepository struct {
-	usage *ports.TenantUsageView
-	err   error
+	usage    *ports.TenantUsageView
+	err      error
+	getCalls int
 }
 
 func (s *stubQueryTenantUsageRepository) Initialize(context.Context, string) error {
@@ -452,6 +589,7 @@ func (s *stubQueryTenantUsageRepository) Initialize(context.Context, string) err
 }
 
 func (s *stubQueryTenantUsageRepository) GetByTenantID(context.Context, string) (*ports.TenantUsageView, error) {
+	s.getCalls++
 	return s.usage, s.err
 }
 
