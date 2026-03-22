@@ -11,8 +11,9 @@ import (
 )
 
 type ResolveDownloadQuery struct {
-	FileID string
-	Auth   domain.AuthContext
+	FileID      string
+	Disposition domain.DownloadDisposition
+	Auth        domain.AuthContext
 }
 
 type ResolveDownloadResult struct {
@@ -22,6 +23,7 @@ type ResolveDownloadResult struct {
 
 type ResolveDownloadHandler struct {
 	repo             ports.FileReadRepository
+	policies         ports.TenantPolicyReader
 	locator          ports.ObjectLocator
 	presign          ports.PresignManager
 	privateTTL       time.Duration
@@ -30,6 +32,7 @@ type ResolveDownloadHandler struct {
 
 func NewResolveDownloadHandler(
 	repo ports.FileReadRepository,
+	policies ports.TenantPolicyReader,
 	locator ports.ObjectLocator,
 	presign ports.PresignManager,
 	privateTTL time.Duration,
@@ -37,6 +40,7 @@ func NewResolveDownloadHandler(
 ) ResolveDownloadHandler {
 	return ResolveDownloadHandler{
 		repo:             repo,
+		policies:         policies,
 		locator:          locator,
 		presign:          presign,
 		privateTTL:       privateTTL,
@@ -54,6 +58,17 @@ func (h ResolveDownloadHandler) Handle(ctx context.Context, query ResolveDownloa
 		return ResolveDownloadResult{}, err
 	}
 	if err := file.EnsureReadable(query.Auth); err != nil {
+		return ResolveDownloadResult{}, err
+	}
+	disposition, err := domain.NormalizeDisposition(query.Disposition)
+	if err != nil {
+		return ResolveDownloadResult{}, err
+	}
+	policy, err := h.policies.GetByTenantID(ctx, file.TenantID)
+	if err != nil {
+		return ResolveDownloadResult{}, err
+	}
+	if err := policy.EnsureAllowed(disposition); err != nil {
 		return ResolveDownloadResult{}, err
 	}
 
