@@ -2,9 +2,9 @@
 
 ## Status
 
-- `pending`
+- `in_progress`
 
 ## Notes
 
-- 尚未开始实现
-- 开工前需要先确定平台层 probe / metrics / scheduler 生命周期接口
+- 已开始落 Phase 1：scheduler / worker 模型与 distributed locker 抽象
+- 当前批次只固化调度锁、续租、释放和执行边界，不提前写具体 cleanup / reconcile SQL
