@@ -40,6 +40,10 @@ func (h ListTenantsHandler) Handle(ctx context.Context, query ListTenantsQuery) 
 	if err := authorizeOperation(query.Auth, domain.OperationListTenants); err != nil {
 		return view.TenantList{}, err
 	}
+	cursor, err := normalizeOptionalQueryValue(query.Cursor, "cursor")
+	if err != nil {
+		return view.TenantList{}, err
+	}
 	if query.Status != nil {
 		if err := query.Status.Validate(); err != nil {
 			return view.TenantList{}, err
@@ -47,7 +51,7 @@ func (h ListTenantsHandler) Handle(ctx context.Context, query ListTenantsQuery) 
 	}
 
 	items, nextCursor, err := h.tenants.List(ctx, ports.ListTenantsQuery{
-		Cursor:       query.Cursor,
+		Cursor:       cursor,
 		Limit:        normalizeLimit(query.Limit, h.defaultLimit, h.maxLimit),
 		Status:       query.Status,
 		TenantScopes: scopedTenants(query.Auth),

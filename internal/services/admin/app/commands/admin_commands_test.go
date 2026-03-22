@@ -134,6 +134,42 @@ func TestPatchTenantWritesAuditOnSuccess(t *testing.T) {
 	}
 }
 
+func TestPatchTenantRequiresReasonForDestructiveStatus(t *testing.T) {
+	t.Parallel()
+
+	status := domain.TenantStatusSuspended
+	tenants := &stubTenantRepository{}
+	audits := &stubAuditLogRepository{}
+	tx := &stubTxManager{}
+	handler := commands.NewPatchTenantHandler(
+		tenants,
+		audits,
+		tx,
+		&stubIDGenerator{id: "audit-destructive"},
+		clock.NewFixed(time.Date(2026, 3, 22, 12, 25, 0, 0, time.UTC)),
+	)
+
+	_, err := handler.Handle(context.Background(), commands.PatchTenantCommand{
+		TenantID: "tenant-a",
+		Patch: domain.TenantPatch{
+			Status: &status,
+		},
+		Auth: mustAdminContext(t, domain.RoleGovernance, "tenant-a"),
+	})
+	if code := xerrors.CodeOf(err); code != xerrors.CodeInvalidArgument {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, xerrors.CodeInvalidArgument, err)
+	}
+	if tenants.patchCalls != 0 {
+		t.Fatalf("patchCalls = %d, want 0", tenants.patchCalls)
+	}
+	if tx.calls != 0 {
+		t.Fatalf("tx calls = %d, want 0", tx.calls)
+	}
+	if len(audits.records) != 0 {
+		t.Fatalf("unexpected audit records: %#v", audits.records)
+	}
+}
+
 func TestPatchTenantPolicyEnforcesDestructiveReasonAndWritesAudit(t *testing.T) {
 	t.Parallel()
 
@@ -247,8 +283,115 @@ func TestDeleteFileWritesAuditAndOutbox(t *testing.T) {
 	if len(outbox.events) != 1 || outbox.events[0].EventType != "file.asset.delete_requested.v1" {
 		t.Fatalf("unexpected outbox events: %#v", outbox.events)
 	}
+	if files.lastDelete != now {
+		t.Fatalf("lastDelete = %v, want %v", files.lastDelete, now)
+	}
+	if got := audits.records[0].Details["reason"]; got != "manual cleanup" {
+		t.Fatalf("audit reason = %#v, want %q", got, "manual cleanup")
+	}
+	if got := audits.records[0].Details["idempotencyKey"]; got != "idem-3" {
+		t.Fatalf("audit idempotencyKey = %#v, want %q", got, "idem-3")
+	}
+	if got := audits.records[0].Details["blobId"]; got != "blob-1" {
+		t.Fatalf("audit blobId = %#v, want %q", got, "blob-1")
+	}
+	event := outbox.events[0]
+	if event.AggregateType != "file_asset" || event.AggregateID != "file-1" {
+		t.Fatalf("unexpected aggregate info: %#v", event)
+	}
+	if event.RequestID != "req-1" || event.TenantID != "tenant-a" {
+		t.Fatalf("unexpected event routing info: %#v", event)
+	}
+	if got := event.Payload["blobObjectId"]; got != "blob-1" {
+		t.Fatalf("payload blobObjectId = %#v, want %q", got, "blob-1")
+	}
+	if got := event.Payload["deletedBy"]; got != "admin-1" {
+		t.Fatalf("payload deletedBy = %#v, want %q", got, "admin-1")
+	}
+	if got := event.Payload["reason"]; got != "manual cleanup" {
+		t.Fatalf("payload reason = %#v, want %q", got, "manual cleanup")
+	}
+	if got := event.Payload["occurredAt"]; got != now.UTC().Format(time.RFC3339) {
+		t.Fatalf("payload occurredAt = %#v, want %q", got, now.UTC().Format(time.RFC3339))
+	}
 	if result.FileID != "file-1" || !result.PhysicalDeleteScheduled {
 		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestDeleteFileRequiresReasonBeforeDelete(t *testing.T) {
+	t.Parallel()
+
+	files := &stubAdminFileRepository{
+		file: &ports.AdminFileView{
+			FileID:   "file-1",
+			TenantID: "tenant-a",
+			Status:   "ACTIVE",
+		},
+	}
+	audits := &stubAuditLogRepository{}
+	outbox := &stubOutboxPublisher{}
+	tx := &stubTxManager{}
+	handler := commands.NewDeleteFileHandler(
+		files,
+		audits,
+		outbox,
+		tx,
+		&stubIDGenerator{id: "audit-reason"},
+		clock.NewFixed(time.Date(2026, 3, 22, 12, 42, 0, 0, time.UTC)),
+	)
+
+	_, err := handler.Handle(context.Background(), commands.DeleteFileCommand{
+		FileID: "file-1",
+		Reason: "   ",
+		Auth:   mustAdminContext(t, domain.RoleGovernance, "tenant-a"),
+	})
+	if code := xerrors.CodeOf(err); code != xerrors.CodeInvalidArgument {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, xerrors.CodeInvalidArgument, err)
+	}
+	if files.markDeleteCalls != 0 {
+		t.Fatalf("markDeleteCalls = %d, want 0", files.markDeleteCalls)
+	}
+	if tx.calls != 0 {
+		t.Fatalf("tx calls = %d, want 0", tx.calls)
+	}
+	if len(audits.records) != 0 {
+		t.Fatalf("unexpected audit records: %#v", audits.records)
+	}
+	if len(outbox.events) != 0 {
+		t.Fatalf("unexpected outbox events: %#v", outbox.events)
+	}
+}
+
+func TestDeleteFileRejectsTenantOutOfScope(t *testing.T) {
+	t.Parallel()
+
+	files := &stubAdminFileRepository{
+		file: &ports.AdminFileView{
+			FileID:   "file-1",
+			TenantID: "tenant-b",
+			Status:   "ACTIVE",
+		},
+	}
+	handler := commands.NewDeleteFileHandler(
+		files,
+		&stubAuditLogRepository{},
+		&stubOutboxPublisher{},
+		&stubTxManager{},
+		&stubIDGenerator{id: "audit-scope"},
+		clock.NewFixed(time.Date(2026, 3, 22, 12, 43, 0, 0, time.UTC)),
+	)
+
+	_, err := handler.Handle(context.Background(), commands.DeleteFileCommand{
+		FileID: "file-1",
+		Reason: "manual cleanup",
+		Auth:   mustAdminContext(t, domain.RoleGovernance, "tenant-a"),
+	})
+	if code := xerrors.CodeOf(err); code != domain.CodeTenantScopeDenied {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, domain.CodeTenantScopeDenied, err)
+	}
+	if files.markDeleteCalls != 0 {
+		t.Fatalf("markDeleteCalls = %d, want 0", files.markDeleteCalls)
 	}
 }
 
@@ -301,6 +444,7 @@ type stubTenantRepository struct {
 	createErr error
 	patched   *domain.Tenant
 	patchErr  error
+	patchCalls int
 }
 
 func (s *stubTenantRepository) Create(_ context.Context, tenant domain.Tenant) error {
@@ -317,6 +461,7 @@ func (s *stubTenantRepository) List(context.Context, ports.ListTenantsQuery) ([]
 }
 
 func (s *stubTenantRepository) Patch(_ context.Context, _ string, _ domain.TenantPatch) (*domain.Tenant, error) {
+	s.patchCalls++
 	return s.patched, s.patchErr
 }
 
@@ -375,6 +520,7 @@ type stubAdminFileRepository struct {
 	deleted    *ports.DeleteFileRecord
 	err        error
 	lastDelete time.Time
+	markDeleteCalls int
 }
 
 func (s *stubAdminFileRepository) GetByID(context.Context, string) (*ports.AdminFileView, error) {
@@ -386,6 +532,7 @@ func (s *stubAdminFileRepository) List(context.Context, ports.ListFilesQuery) ([
 }
 
 func (s *stubAdminFileRepository) MarkDeleted(_ context.Context, _ string, deletedAt time.Time) (*ports.DeleteFileRecord, error) {
+	s.markDeleteCalls++
 	s.lastDelete = deletedAt
 	return s.deleted, s.err
 }
