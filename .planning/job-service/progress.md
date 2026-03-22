@@ -2,9 +2,10 @@
 
 ## Status
 
-- `in_progress`
+- `completed`
 
 ## Notes
 
-- 已开始落 Phase 1：scheduler / worker 模型与 distributed locker 抽象
-- 当前批次只固化调度锁、续租、释放和执行边界，不提前写具体 cleanup / reconcile SQL
+- 已完成 scheduler / worker 模型、distributed locker 抽象、维护任务骨架与 observability 接缝
+- Phase 5 已补强分布式锁 acquire/release/takeover 边界、worker 失败观测、maintenance job 默认配置与 no-op/错误计数传播测试
+- 当前代码已合并回 `leader/batch1-foundation` 并通过 `go test ./...` 与目标服务 `-race` 校验
