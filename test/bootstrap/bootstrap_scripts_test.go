@@ -96,7 +96,9 @@ func TestMigrateBuildFailsOnMissingPair(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected missing pair failure, output:\n%s", out)
 	}
-	if !strings.Contains(out, "成对") && !strings.Contains(strings.ToLower(out), "pair") {
+	if !strings.Contains(out, "成对") &&
+		!strings.Contains(strings.ToLower(out), "pair") &&
+		!strings.Contains(strings.ToLower(out), "both up and down") {
 		t.Fatalf("expected pair hint, output:\n%s", out)
 	}
 }

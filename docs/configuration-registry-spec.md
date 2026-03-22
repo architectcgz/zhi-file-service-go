@@ -228,7 +228,7 @@ type Config struct {
 | `upload.session_ttl` | `UPLOAD_SESSION_TTL` | duration | 否 | 否 | `24h` | 会话存活时间 |
 | `upload.complete_timeout` | `UPLOAD_COMPLETE_TIMEOUT` | duration | 否 | 否 | `30s` | complete 内部超时 |
 | `upload.presign_ttl` | `UPLOAD_PRESIGN_TTL` | duration | 否 | 否 | `15m` | presign 过期时间 |
-| `upload.allowed_modes` | `UPLOAD_ALLOWED_MODES` | csv | 否 | 否 | `INLINE,PRESIGNED_SINGLE,MULTIPART` | 允许上传模式 |
+| `upload.allowed_modes` | `UPLOAD_ALLOWED_MODES` | csv | 否 | 否 | `INLINE,PRESIGNED_SINGLE,DIRECT` | 允许上传模式 |
 
 ## 6.2 `access-service`
 
