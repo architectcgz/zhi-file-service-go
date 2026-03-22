@@ -87,7 +87,7 @@ func (h CreateTenantHandler) Handle(ctx context.Context, command CreateTenantCom
 			return err
 		}
 
-		record, err := newAuditRecord(txCtx, h.idgen, h.clock, command.Auth, tenantID, actionTenantCreate, map[string]any{
+		record, err := newAuditRecord(h.idgen, h.clock, command.Auth, tenantID, actionTenantCreate, "tenant", tenantID, map[string]any{
 			"tenantName":     tenantName,
 			"status":         tenant.Status,
 			"idempotencyKey": optionalField(command.IdempotencyKey),

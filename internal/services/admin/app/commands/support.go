@@ -16,6 +16,7 @@ const (
 	actionTenantCreate      = "tenant.create"
 	actionTenantPatch       = "tenant.patch"
 	actionTenantPolicyPatch = "tenant_policy.patch"
+	actionFileDelete        = "file.delete"
 )
 
 type inlineTxManager struct{}
@@ -79,12 +80,13 @@ func validateOptionalEmail(email string) error {
 }
 
 func newAuditRecord(
-	ctx context.Context,
 	idgen ids.Generator,
 	clk clock.Clock,
 	auth domain.AdminContext,
 	tenantID string,
 	action string,
+	targetType string,
+	targetID string,
 	details map[string]any,
 ) (ports.AuditLogRecord, error) {
 	auditID, err := idgen.New()
@@ -97,6 +99,8 @@ func newAuditRecord(
 		AdminSubject: auth.AdminID,
 		TenantID:     strings.TrimSpace(tenantID),
 		Action:       action,
+		TargetType:   strings.TrimSpace(targetType),
+		TargetID:     strings.TrimSpace(targetID),
 		RequestID:    auth.RequestID,
 		Details:      details,
 		CreatedAt:    clk.Now(),

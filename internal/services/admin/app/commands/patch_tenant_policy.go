@@ -78,7 +78,7 @@ func (h PatchTenantPolicyHandler) Handle(ctx context.Context, command PatchTenan
 			return domain.ErrTenantNotFound(tenantID)
 		}
 
-		record, err := newAuditRecord(txCtx, h.idgen, h.clock, command.Auth, tenantID, actionTenantPolicyPatch, tenantPolicyPatchDetails(patch, command.IdempotencyKey))
+		record, err := newAuditRecord(h.idgen, h.clock, command.Auth, tenantID, actionTenantPolicyPatch, "tenantPolicy", tenantID, tenantPolicyPatchDetails(patch, command.IdempotencyKey))
 		if err != nil {
 			return err
 		}

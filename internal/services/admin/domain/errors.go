@@ -6,6 +6,7 @@ const (
 	CodeAdminPermissionDenied xerrors.Code = "ADMIN_PERMISSION_DENIED"
 	CodeTenantScopeDenied     xerrors.Code = "TENANT_SCOPE_DENIED"
 	CodeTenantNotFound        xerrors.Code = "TENANT_NOT_FOUND"
+	CodeFileNotFound          xerrors.Code = "FILE_NOT_FOUND"
 	CodeTenantStatusInvalid   xerrors.Code = "TENANT_STATUS_INVALID"
 	CodeTenantPolicyInvalid   xerrors.Code = "TENANT_POLICY_INVALID"
 	CodeAuditQueryInvalid     xerrors.Code = "AUDIT_QUERY_INVALID"
@@ -27,6 +28,12 @@ func ErrTenantScopeDenied(tenantID string) error {
 func ErrTenantNotFound(tenantID string) error {
 	return xerrors.New(CodeTenantNotFound, "tenant not found", xerrors.Details{
 		"tenantId": tenantID,
+	})
+}
+
+func ErrFileNotFound(fileID string) error {
+	return xerrors.New(CodeFileNotFound, "file not found", xerrors.Details{
+		"fileId": fileID,
 	})
 }
 

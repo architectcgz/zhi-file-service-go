@@ -9,6 +9,7 @@ import (
 	"github.com/architectcgz/zhi-file-service-go/internal/services/admin/domain"
 	"github.com/architectcgz/zhi-file-service-go/internal/services/admin/ports"
 	"github.com/architectcgz/zhi-file-service-go/pkg/clock"
+	pkgstorage "github.com/architectcgz/zhi-file-service-go/pkg/storage"
 	"github.com/architectcgz/zhi-file-service-go/pkg/xerrors"
 )
 
@@ -197,6 +198,104 @@ func TestPatchTenantPolicyEnforcesDestructiveReasonAndWritesAudit(t *testing.T) 
 	}
 }
 
+func TestDeleteFileWritesAuditAndOutbox(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 3, 22, 12, 40, 0, 0, time.UTC)
+	files := &stubAdminFileRepository{
+		file: &ports.AdminFileView{
+			FileID:      "file-1",
+			TenantID:    "tenant-a",
+			BlobID:      "blob-1",
+			FileName:    "report.pdf",
+			ContentType: "application/pdf",
+			SizeBytes:   10,
+			AccessLevel: pkgstorage.AccessLevelPrivate,
+			Status:      "ACTIVE",
+		},
+		deleted: &ports.DeleteFileRecord{
+			File: ports.AdminFileView{
+				FileID:      "file-1",
+				TenantID:    "tenant-a",
+				BlobID:      "blob-1",
+				FileName:    "report.pdf",
+				ContentType: "application/pdf",
+				SizeBytes:   10,
+				AccessLevel: pkgstorage.AccessLevelPrivate,
+				Status:      "DELETED",
+				DeletedAt:   timePtr(now),
+			},
+			PhysicalDeleteScheduled: true,
+		},
+	}
+	audits := &stubAuditLogRepository{}
+	outbox := &stubOutboxPublisher{}
+	handler := commands.NewDeleteFileHandler(files, audits, outbox, &stubTxManager{}, &stubIDGenerator{id: "audit-6"}, clock.NewFixed(now))
+
+	result, err := handler.Handle(context.Background(), commands.DeleteFileCommand{
+		FileID:         "file-1",
+		Reason:         "manual cleanup",
+		IdempotencyKey: "idem-3",
+		Auth:           mustAdminContext(t, domain.RoleGovernance, "tenant-a"),
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(audits.records) != 1 || audits.records[0].Action != "file.delete" {
+		t.Fatalf("unexpected audit records: %#v", audits.records)
+	}
+	if len(outbox.events) != 1 || outbox.events[0].EventType != "file.asset.delete_requested.v1" {
+		t.Fatalf("unexpected outbox events: %#v", outbox.events)
+	}
+	if result.FileID != "file-1" || !result.PhysicalDeleteScheduled {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestDeleteFileIsIdempotentWhenAlreadyDeleted(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 3, 22, 12, 45, 0, 0, time.UTC)
+	files := &stubAdminFileRepository{
+		file: &ports.AdminFileView{
+			FileID:   "file-1",
+			TenantID: "tenant-a",
+			Status:   "DELETED",
+		},
+		deleted: &ports.DeleteFileRecord{
+			File: ports.AdminFileView{
+				FileID:    "file-1",
+				TenantID:  "tenant-a",
+				Status:    "DELETED",
+				DeletedAt: timePtr(now.Add(-time.Minute)),
+			},
+			PhysicalDeleteScheduled: true,
+			AlreadyDeleted:          true,
+		},
+	}
+	audits := &stubAuditLogRepository{}
+	outbox := &stubOutboxPublisher{}
+	handler := commands.NewDeleteFileHandler(files, audits, outbox, &stubTxManager{}, &stubIDGenerator{id: "audit-7"}, clock.NewFixed(now))
+
+	result, err := handler.Handle(context.Background(), commands.DeleteFileCommand{
+		FileID: "file-1",
+		Reason: "repeat request",
+		Auth:   mustAdminContext(t, domain.RoleGovernance, "tenant-a"),
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(audits.records) != 0 {
+		t.Fatalf("expected no audit records, got %#v", audits.records)
+	}
+	if len(outbox.events) != 0 {
+		t.Fatalf("expected no outbox events, got %#v", outbox.events)
+	}
+	if result.Status != "DELETED" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
 type stubTenantRepository struct {
 	created   domain.Tenant
 	createErr error
@@ -271,6 +370,36 @@ func (s *stubAuditLogRepository) List(context.Context, ports.ListAuditLogsQuery)
 	panic("unexpected call")
 }
 
+type stubAdminFileRepository struct {
+	file       *ports.AdminFileView
+	deleted    *ports.DeleteFileRecord
+	err        error
+	lastDelete time.Time
+}
+
+func (s *stubAdminFileRepository) GetByID(context.Context, string) (*ports.AdminFileView, error) {
+	return s.file, s.err
+}
+
+func (s *stubAdminFileRepository) List(context.Context, ports.ListFilesQuery) ([]ports.AdminFileView, string, error) {
+	panic("unexpected call")
+}
+
+func (s *stubAdminFileRepository) MarkDeleted(_ context.Context, _ string, deletedAt time.Time) (*ports.DeleteFileRecord, error) {
+	s.lastDelete = deletedAt
+	return s.deleted, s.err
+}
+
+type stubOutboxPublisher struct {
+	events []ports.OutboxEvent
+	err    error
+}
+
+func (s *stubOutboxPublisher) Publish(_ context.Context, event ports.OutboxEvent) error {
+	s.events = append(s.events, event)
+	return s.err
+}
+
 type stubTxManager struct {
 	calls int
 }
@@ -309,5 +438,9 @@ func stringPtr(value string) *string {
 }
 
 func int64Ptr(value int64) *int64 {
+	return &value
+}
+
+func timePtr(value time.Time) *time.Time {
 	return &value
 }

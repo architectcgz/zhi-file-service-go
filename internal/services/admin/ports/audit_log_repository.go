@@ -10,15 +10,20 @@ type AuditLogRecord struct {
 	AdminSubject string
 	TenantID     string
 	Action       string
+	TargetType   string
+	TargetID     string
 	RequestID    string
 	Details      map[string]any
 	CreatedAt    time.Time
 }
 
 type ListAuditLogsQuery struct {
-	TenantID string
-	Cursor   string
-	Limit    int
+	TenantID     string
+	TenantScopes []string
+	ActorID      string
+	Action       string
+	Cursor       string
+	Limit        int
 }
 
 type AuditLogRepository interface {

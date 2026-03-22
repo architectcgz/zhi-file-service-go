@@ -8,6 +8,7 @@ import (
 	"github.com/architectcgz/zhi-file-service-go/internal/services/admin/app/queries"
 	"github.com/architectcgz/zhi-file-service-go/internal/services/admin/domain"
 	"github.com/architectcgz/zhi-file-service-go/internal/services/admin/ports"
+	pkgstorage "github.com/architectcgz/zhi-file-service-go/pkg/storage"
 )
 
 func TestGetTenantReturnsTenant(t *testing.T) {
@@ -134,6 +135,110 @@ func TestGetTenantUsageReturnsUsageView(t *testing.T) {
 	}
 }
 
+func TestGetFileReturnsScopedFile(t *testing.T) {
+	t.Parallel()
+
+	handler := queries.NewGetFileHandler(&stubAdminFileQueryRepository{
+		file: &ports.AdminFileView{
+			FileID:      "file-1",
+			TenantID:    "tenant-a",
+			FileName:    "report.pdf",
+			ContentType: "application/pdf",
+			SizeBytes:   10,
+			AccessLevel: pkgstorage.AccessLevelPrivate,
+			Status:      "ACTIVE",
+		},
+	})
+
+	result, err := handler.Handle(context.Background(), queries.GetFileQuery{
+		FileID: "file-1",
+		Auth:   mustQueryAdminContext(t, domain.RoleReadonly, "tenant-a"),
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if result.FileID != "file-1" || result.Status != "ACTIVE" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestListFilesPassesScopeAndFilters(t *testing.T) {
+	t.Parallel()
+
+	repo := &stubAdminFileQueryRepository{
+		files: []ports.AdminFileView{
+			{
+				FileID:      "file-1",
+				TenantID:    "tenant-a",
+				FileName:    "report.pdf",
+				ContentType: "application/pdf",
+				SizeBytes:   10,
+				AccessLevel: pkgstorage.AccessLevelPrivate,
+				Status:      "ACTIVE",
+			},
+		},
+		nextCursor: "next-1",
+	}
+	handler := queries.NewListFilesHandler(repo, queries.ListFilesConfig{DefaultLimit: 20, MaxLimit: 100})
+
+	result, err := handler.Handle(context.Background(), queries.ListFilesQuery{
+		Status: "ACTIVE",
+		Limit:  999,
+		Auth:   mustQueryAdminContextWithScopes(t, domain.RoleReadonly, "tenant-a", "tenant-b"),
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if repo.listQuery.Limit != 100 {
+		t.Fatalf("normalized limit = %d, want 100", repo.listQuery.Limit)
+	}
+	if len(repo.listQuery.TenantScopes) != 2 {
+		t.Fatalf("tenant scopes = %#v", repo.listQuery.TenantScopes)
+	}
+	if result.NextCursor != "next-1" || len(result.Items) != 1 {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
+func TestListAuditLogsPassesTenantActorAndActionFilters(t *testing.T) {
+	t.Parallel()
+
+	repo := &stubAuditLogQueryRepository{
+		logs: []ports.AuditLogRecord{
+			{
+				AuditID:      "audit-1",
+				TenantID:     "tenant-a",
+				AdminSubject: "admin-1",
+				Action:       "FILE_DELETE",
+				TargetType:   "file",
+				TargetID:     "file-1",
+			},
+		},
+		nextCursor: "next-2",
+	}
+	handler := queries.NewListAuditLogsHandler(repo, queries.ListAuditLogsConfig{DefaultLimit: 10, MaxLimit: 50})
+
+	result, err := handler.Handle(context.Background(), queries.ListAuditLogsQuery{
+		TenantID: "tenant-a",
+		ActorID:  "admin-1",
+		Action:   "FILE_DELETE",
+		Limit:    0,
+		Auth:     mustQueryAdminContext(t, domain.RoleReadonly, "tenant-a"),
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if repo.query.ActorID != "admin-1" || repo.query.Action != "FILE_DELETE" {
+		t.Fatalf("unexpected query filters: %#v", repo.query)
+	}
+	if repo.query.Limit != 10 {
+		t.Fatalf("normalized limit = %d, want 10", repo.query.Limit)
+	}
+	if result.NextCursor != "next-2" || len(result.Items) != 1 {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+}
+
 type stubQueryTenantRepository struct {
 	tenant     *domain.Tenant
 	err        error
@@ -187,6 +292,43 @@ func (s *stubQueryTenantUsageRepository) Initialize(context.Context, string) err
 
 func (s *stubQueryTenantUsageRepository) GetByTenantID(context.Context, string) (*ports.TenantUsageView, error) {
 	return s.usage, s.err
+}
+
+type stubAdminFileQueryRepository struct {
+	file       *ports.AdminFileView
+	files      []ports.AdminFileView
+	nextCursor string
+	err        error
+	listQuery  ports.ListFilesQuery
+}
+
+func (s *stubAdminFileQueryRepository) GetByID(context.Context, string) (*ports.AdminFileView, error) {
+	return s.file, s.err
+}
+
+func (s *stubAdminFileQueryRepository) List(_ context.Context, query ports.ListFilesQuery) ([]ports.AdminFileView, string, error) {
+	s.listQuery = query
+	return s.files, s.nextCursor, s.err
+}
+
+func (s *stubAdminFileQueryRepository) MarkDeleted(context.Context, string, time.Time) (*ports.DeleteFileRecord, error) {
+	panic("unexpected call")
+}
+
+type stubAuditLogQueryRepository struct {
+	logs       []ports.AuditLogRecord
+	nextCursor string
+	err        error
+	query      ports.ListAuditLogsQuery
+}
+
+func (s *stubAuditLogQueryRepository) Append(context.Context, ports.AuditLogRecord) error {
+	panic("unexpected call")
+}
+
+func (s *stubAuditLogQueryRepository) List(_ context.Context, query ports.ListAuditLogsQuery) ([]ports.AuditLogRecord, string, error) {
+	s.query = query
+	return s.logs, s.nextCursor, s.err
 }
 
 func mustQueryAdminContext(t *testing.T, role domain.Role, scope string) domain.AdminContext {
