@@ -2,9 +2,10 @@
 
 ## Status
 
-- `pending`
+- `in_progress`
 
 ## Notes
 
-- 尚未开始实现
-- 开工前需要先把统一 probe endpoint 与 metrics 暴露方式定稿
+- 已从 `leader/batch1-foundation` 拉起 `feat/access-service-core`
+- 已完成 Phase 1，并提前落了最小查询/命令编排骨架与测试
+- 下一步进入 Phase 2/3：继续补齐 `GetFile`、ticket、redirect 的 transport 与 infra 落位
