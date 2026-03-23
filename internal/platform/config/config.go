@@ -111,7 +111,9 @@ type JobConfig struct {
 	LockRenewInterval             time.Duration
 	ExpireUploadSessionsInterval  time.Duration
 	RepairStuckCompletingInterval time.Duration
+	ProcessOutboxEventsInterval   time.Duration
 	FinalizeFileDeleteInterval    time.Duration
+	CleanupMultipartInterval      time.Duration
 	FileDeleteRetention           time.Duration
 	CleanupOrphanBlobsInterval    time.Duration
 	ReconcileTenantUsageInterval  time.Duration
@@ -170,7 +172,9 @@ func Load(serviceName string) (Config, error) {
 			LockRenewInterval:             10 * time.Second,
 			ExpireUploadSessionsInterval:  5 * time.Minute,
 			RepairStuckCompletingInterval: 2 * time.Minute,
+			ProcessOutboxEventsInterval:   15 * time.Second,
 			FinalizeFileDeleteInterval:    1 * time.Minute,
+			CleanupMultipartInterval:      10 * time.Minute,
 			FileDeleteRetention:           168 * time.Hour,
 			CleanupOrphanBlobsInterval:    10 * time.Minute,
 			ReconcileTenantUsageInterval:  30 * time.Minute,
@@ -354,10 +358,20 @@ func Load(serviceName string) (Config, error) {
 	} else {
 		cfg.Job.RepairStuckCompletingInterval = value
 	}
+	if value, err := durationFromEnv("JOB_PROCESS_OUTBOX_EVENTS_INTERVAL", cfg.Job.ProcessOutboxEventsInterval); err != nil {
+		errs = append(errs, err)
+	} else {
+		cfg.Job.ProcessOutboxEventsInterval = value
+	}
 	if value, err := durationFromEnv("JOB_FINALIZE_FILE_DELETE_INTERVAL", cfg.Job.FinalizeFileDeleteInterval); err != nil {
 		errs = append(errs, err)
 	} else {
 		cfg.Job.FinalizeFileDeleteInterval = value
+	}
+	if value, err := durationFromEnv("JOB_CLEANUP_MULTIPART_INTERVAL", cfg.Job.CleanupMultipartInterval); err != nil {
+		errs = append(errs, err)
+	} else {
+		cfg.Job.CleanupMultipartInterval = value
 	}
 	if value, err := durationFromEnv("JOB_FILE_DELETE_RETENTION", cfg.Job.FileDeleteRetention); err != nil {
 		errs = append(errs, err)
@@ -518,8 +532,14 @@ func (c Config) Validate() error {
 	if c.Job.RepairStuckCompletingInterval <= 0 {
 		errs = append(errs, errors.New("JOB_REPAIR_STUCK_COMPLETING_INTERVAL must be > 0"))
 	}
+	if c.Job.ProcessOutboxEventsInterval <= 0 {
+		errs = append(errs, errors.New("JOB_PROCESS_OUTBOX_EVENTS_INTERVAL must be > 0"))
+	}
 	if c.Job.FinalizeFileDeleteInterval <= 0 {
 		errs = append(errs, errors.New("JOB_FINALIZE_FILE_DELETE_INTERVAL must be > 0"))
+	}
+	if c.Job.CleanupMultipartInterval <= 0 {
+		errs = append(errs, errors.New("JOB_CLEANUP_MULTIPART_INTERVAL must be > 0"))
 	}
 	if c.Job.FileDeleteRetention <= 0 {
 		errs = append(errs, errors.New("JOB_FILE_DELETE_RETENTION must be > 0"))

@@ -264,9 +264,11 @@ type Config struct {
 | `job.lock_backend` | `JOB_LOCK_BACKEND` | string | 否 | 否 | `redis` | 分布式锁后端 |
 | `job.lock_ttl` | `JOB_LOCK_TTL` | duration | 否 | 否 | `30s` | 锁 TTL |
 | `job.lock_renew_interval` | `JOB_LOCK_RENEW_INTERVAL` | duration | 否 | 否 | `10s` | 续租间隔 |
-| `job.expire_upload_sessions.interval` | `JOB_EXPIRE_UPLOAD_SESSIONS_INTERVAL` | duration | 否 | 否 | `1m` | 过期会话扫描周期 |
+| `job.expire_upload_sessions.interval` | `JOB_EXPIRE_UPLOAD_SESSIONS_INTERVAL` | duration | 否 | 否 | `5m` | 过期会话扫描周期 |
 | `job.repair_stuck_completing.interval` | `JOB_REPAIR_STUCK_COMPLETING_INTERVAL` | duration | 否 | 否 | `2m` | stuck completing 修复周期 |
+| `job.process_outbox_events.interval` | `JOB_PROCESS_OUTBOX_EVENTS_INTERVAL` | duration | 否 | 否 | `15s` | outbox 事件消费周期 |
 | `job.finalize_file_delete.interval` | `JOB_FINALIZE_FILE_DELETE_INTERVAL` | duration | 否 | 否 | `1m` | 文件物理删除周期 |
+| `job.cleanup_multipart.interval` | `JOB_CLEANUP_MULTIPART_INTERVAL` | duration | 否 | 否 | `10m` | provider multipart 残留清理周期 |
 | `job.file_delete_retention` | `JOB_FILE_DELETE_RETENTION` | duration | 否 | 否 | `168h` | 文件逻辑删除后的最小保留窗口 |
 | `job.cleanup_orphan_blobs.interval` | `JOB_CLEANUP_ORPHAN_BLOBS_INTERVAL` | duration | 否 | 否 | `10m` | 孤儿对象清理周期 |
 | `job.reconcile_tenant_usage.interval` | `JOB_RECONCILE_TENANT_USAGE_INTERVAL` | duration | 否 | 否 | `30m` | usage 对账周期 |

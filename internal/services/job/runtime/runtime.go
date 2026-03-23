@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/architectcgz/zhi-file-service-go/internal/platform/bootstrap"
-	jobjobs "github.com/architectcgz/zhi-file-service-go/internal/services/job/app/jobs"
 	jobobs "github.com/architectcgz/zhi-file-service-go/internal/services/job/app/observability"
 	jobscheduler "github.com/architectcgz/zhi-file-service-go/internal/services/job/app/scheduler"
 	jobpostgres "github.com/architectcgz/zhi-file-service-go/internal/services/job/infra/postgres"
@@ -42,47 +41,25 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 	clk := clock.SystemClock{}
 
 	uploadSessions := jobpostgres.NewUploadSessionRepository(app.DB)
+	outboxReader := jobpostgres.NewOutboxReader(app.DB)
 	fileCleanup := jobpostgres.NewFileCleanupRepository(app.DB, storageAdapter)
 	blobRepo := jobpostgres.NewBlobRepository(app.DB, storageAdapter)
+	multipartRepo := jobpostgres.NewMultipartRepository(app.DB, storageAdapter)
 	tenantUsage := jobpostgres.NewTenantUsageRepository(app.DB)
 	locker := jobrunner.NewRedisLocker(app.Redis)
 	scheduler := jobscheduler.New(locker, nil)
+	outboxConsumer := newOutboxConsumer(outboxReader, observer, clk, app.Config.Job.DefaultBatchSize)
 
 	runtime := jobrunner.New(jobrunner.RuntimeConfig{
 		Scheduler: scheduler,
-		Jobs: []jobrunner.ScheduledJob{
-			{
-				Job: jobjobs.NewExpireUploadSessionsJob(uploadSessions, clk, jobjobs.ExpireUploadSessionsConfig{
-					BatchSize: app.Config.Job.DefaultBatchSize,
-				}),
-				Interval: app.Config.Job.ExpireUploadSessionsInterval,
-			},
-			{
-				Job: jobjobs.NewRepairStuckCompletingJob(uploadSessions, clk, jobjobs.RepairStuckCompletingConfig{
-					BatchSize: app.Config.Job.DefaultBatchSize,
-				}),
-				Interval: app.Config.Job.RepairStuckCompletingInterval,
-			},
-			{
-				Job: jobjobs.NewFinalizeFileDeleteJob(fileCleanup, clk, jobjobs.FinalizeFileDeleteConfig{
-					BatchSize: app.Config.Job.DefaultBatchSize,
-					Retention: app.Config.Job.FileDeleteRetention,
-				}),
-				Interval: app.Config.Job.FinalizeFileDeleteInterval,
-			},
-			{
-				Job: jobjobs.NewCleanupOrphanBlobsJob(blobRepo, clk, jobjobs.CleanupOrphanBlobsConfig{
-					BatchSize: app.Config.Job.DefaultBatchSize,
-				}),
-				Interval: app.Config.Job.CleanupOrphanBlobsInterval,
-			},
-			{
-				Job: jobjobs.NewReconcileTenantUsageJob(tenantUsage, jobjobs.ReconcileTenantUsageConfig{
-					BatchSize: app.Config.Job.DefaultBatchSize,
-				}),
-				Interval: app.Config.Job.ReconcileTenantUsageInterval,
-			},
-		},
+		Jobs: buildScheduledJobs(app.Config.Job, scheduledJobDependencies{
+			UploadSessions: uploadSessions,
+			FileCleanup:    fileCleanup,
+			BlobRepo:       blobRepo,
+			MultipartRepo:  multipartRepo,
+			TenantUsage:    tenantUsage,
+			OutboxConsumer: outboxConsumer,
+		}, clk),
 		LockTTL:       app.Config.Job.LockTTL,
 		RenewInterval: app.Config.Job.LockRenewInterval,
 		Observer:      observer,

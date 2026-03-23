@@ -38,30 +38,43 @@
 
 ```text
 internal/services/job/
+  domain/
   app/
     scheduler/
     jobs/
+      job.go
       expire_upload_sessions.go
       repair_stuck_completing.go
+      process_outbox_events.go
       finalize_file_delete.go
+      cleanup_multipart.go
       cleanup_orphan_blobs.go
       reconcile_tenant_usage.go
-      cleanup_multipart.go
+    outbox/
+      consumer.go
+    observability/
+      observer.go
   ports/
     upload_session_repository.go
     file_cleanup_repository.go
     blob_repository.go
+    multipart_repository.go
     tenant_usage_repository.go
     outbox_reader.go
     distributed_locker.go
-    storage_ports.go
   infra/
     postgres/
     storage/
+      adapter.go
     runner/
+  runtime/
+    runtime.go
+    catalog.go
+    runtime_test.go
+    runtime_integration_test.go
 ```
 
-`job-service` 第一阶段不需要单独 `domain/`，以任务编排和幂等流程为主。
+`job-service` 第一阶段没有复杂领域模型，`domain/` 可先保持占位，不承载核心业务规则；实现重心仍在任务编排、锁语义和幂等流程。
 
 ## 4. 执行模型
 
@@ -225,6 +238,32 @@ internal/services/job/
 
 第一阶段不引入 Kafka，不等于允许每个在线服务各写一套“自己扫表补偿”逻辑。
 
+运行时要求：
+
+- `process_outbox_events` 必须注册进 `job-service` scheduler，而不是只停留在单测或库级实现
+- 只 claim 已注册 handler 的 `event_type`，避免把尚未支持的事件批量标记失败
+- 当前至少消费：
+  - `file.asset.delete_requested.v1`
+  - `upload.session.failed.v1`
+- handler 可以先做最小 payload 校验和 ack，但不能缺席
+
+## 6.3.1 runtime 注册清单
+
+`job-service` 第一阶段默认注册以下周期任务：
+
+- `expire_upload_sessions`
+- `repair_stuck_completing`
+- `process_outbox_events`
+- `finalize_file_delete`
+- `cleanup_multipart`
+- `cleanup_orphan_blobs`
+- `reconcile_tenant_usage`
+
+其中：
+
+- `process_outbox_events` 用于清空已支持事件的 outbox backlog，并维持失败重试语义
+- `cleanup_multipart` 负责清理 `ABORTED` / `EXPIRED` / `FAILED` 终态后遗留的 provider multipart 上下文
+
 ## 6.4 分布式锁接口约束
 
 建议抽象：
@@ -280,7 +319,9 @@ type LockHandle interface {
 - `job.lock_renew_interval`
 - `job.expire_upload_sessions.interval`
 - `job.repair_stuck_completing.interval`
+- `job.process_outbox_events.interval`
 - `job.finalize_file_delete.interval`
+- `job.cleanup_multipart.interval`
 - `job.file_delete_retention`
 - `job.cleanup_orphan_blobs.interval`
 - `job.reconcile_tenant_usage.interval`
@@ -307,8 +348,11 @@ type LockHandle interface {
 
 - `job.expire_upload_sessions`
 - `job.repair_stuck_completing`
+- `job.process_outbox_events`
 - `job.finalize_file_delete`
+- `job.cleanup_multipart`
 - `job.cleanup_orphan_blobs`
+- `job.reconcile_tenant_usage`
 
 ## 10. 测试要求
 
@@ -319,7 +363,10 @@ type LockHandle interface {
 - 重复调度不重复处理
 - `FOR UPDATE SKIP LOCKED` 领取行为
 - stuck completing 修复
+- outbox handler 注册覆盖与最小 payload 校验
 - file delete 物理清理幂等
+- 管理员 delete -> finalize file delete 闭环
+- failed direct upload -> cleanup multipart 闭环
 - usage 对账修复
 
 ## 11. Code Review 检查项

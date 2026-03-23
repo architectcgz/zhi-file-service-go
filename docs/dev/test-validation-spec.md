@@ -133,6 +133,7 @@
 - Redis 分布式锁
 - 对象存储 multipart / presign / finalize
 - outbox 发布与幂等消费
+- 单服务 runtime / wiring 闭环验证
 
 要求：
 
@@ -140,6 +141,7 @@
 - 必须使用真实 PostgreSQL / Redis / MinIO
 - 每个测试运行必须自带数据准备与清理
 - 禁止依赖共享的人工维护测试环境
+- 不依赖真实基础设施、但需要真实 handler + runtime 接线的服务内集成验证，可紧贴代码放在 `internal/services/<service>/**/*_integration_test.go`
 
 ## 3.3 契约测试
 
@@ -180,8 +182,6 @@
 
 - 上传后立即访问下载
 - 管理员删除文件后访问链路失效
-- job-service 清理后对象状态和元数据一致
-- outbox 驱动的异步补偿闭环
 
 要求：
 
@@ -229,6 +229,7 @@ test/
 
 - 单测仍紧贴业务代码
 - `test/integration` 放真实依赖集成验证
+- `internal/services/<service>/**/*_integration_test.go` 放服务内 runtime / wiring 集成验证
 - `test/contract` 放 OpenAPI 契约校验
 - `test/e2e` 放跨服务闭环验证
 - `test/performance` 放 k6 脚本与压测场景
