@@ -1,6 +1,7 @@
 import http from "k6/http";
 import { check, sleep } from "k6";
 
+import { createStorageURLRewriter } from "./storage-url-rewrite.mjs";
 import {
   authHeaders,
   idempotencyKey,
@@ -15,11 +16,15 @@ import {
 const BASE_URL = __ENV.BASE_URL || "http://127.0.0.1:8080";
 const BEARER_TOKEN = requireEnv("BEARER_TOKEN");
 const STORAGE_ENDPOINT_REWRITE_FROM =
-  __ENV.STORAGE_ENDPOINT_REWRITE_FROM || "http://zhi-file-perf-minio:9000";
+  "STORAGE_ENDPOINT_REWRITE_FROM" in __ENV ? __ENV.STORAGE_ENDPOINT_REWRITE_FROM : undefined;
 const STORAGE_ENDPOINT_REWRITE_TO =
-  __ENV.STORAGE_ENDPOINT_REWRITE_TO || "http://127.0.0.1:19000";
+  "STORAGE_ENDPOINT_REWRITE_TO" in __ENV ? __ENV.STORAGE_ENDPOINT_REWRITE_TO : undefined;
 const DIRECT_PART_ONE_BYTES = Number(__ENV.UPLOAD_DIRECT_PART_ONE_BYTES || 5 * 1024 * 1024);
 const DIRECT_PART_TWO_BYTES = Number(__ENV.UPLOAD_DIRECT_PART_TWO_BYTES || 512 * 1024);
+const rewriteStorageURL = createStorageURLRewriter({
+  from: STORAGE_ENDPOINT_REWRITE_FROM,
+  to: STORAGE_ENDPOINT_REWRITE_TO,
+});
 
 const INLINE_PAYLOAD_BASE = `inline-${"A".repeat(16 * 1024)}`;
 const PRESIGNED_SINGLE_PAYLOAD_BASE = `presigned-single-${"B".repeat(32 * 1024)}`;
@@ -166,19 +171,6 @@ function completeWithRetry(uploadSessionId, body, operation, attempts = 5) {
     sleep(0.2);
   }
   return lastRes;
-}
-
-function rewriteStorageURL(value) {
-  if (!value) {
-    return value;
-  }
-  if (!STORAGE_ENDPOINT_REWRITE_FROM || !STORAGE_ENDPOINT_REWRITE_TO) {
-    return value;
-  }
-  if (!value.startsWith(STORAGE_ENDPOINT_REWRITE_FROM)) {
-    return value;
-  }
-  return STORAGE_ENDPOINT_REWRITE_TO + value.slice(STORAGE_ENDPOINT_REWRITE_FROM.length);
 }
 
 export function inlineCompleteFlow() {

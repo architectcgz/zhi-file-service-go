@@ -142,7 +142,7 @@ scripts/test/performance.sh
 说明：
 
 - `upload-all-apis.js` 的 `DIRECT` 流量必须用合法 multipart part 大小执行。默认第 1 个分片为 `5 MiB`，第 2 个分片为 `512 KiB`，以满足 S3 / MinIO 对“非最后一个分片至少 5 MiB”的约束。
-- upload 全量脚本推荐放在与服务相同的 Docker 网络里执行；否则需要通过 `STORAGE_ENDPOINT_REWRITE_FROM/TO` 把服务返回的对象存储地址改写成压测执行器可达地址。
+- upload 全量脚本推荐放在与服务相同的 Docker 网络里执行；否则需要通过 `STORAGE_ENDPOINT_REWRITE_FROM/TO` 把服务返回的对象存储地址改写成压测执行器可达地址。脚本内建兼容 `http://host.docker.internal:19000` 和 `http://zhi-file-perf-minio:9000` 两类常见返回地址。
 - full-api 入口的 warm-up 会用同一份脚本先跑一次短时低并发预热，因此不会把冷启动抖动混进正式阈值判断。
 
 ## 3. admin-service 独立治理 k6 脚本
@@ -214,9 +214,9 @@ k6 run test/performance/admin-governance-workload.js
 - `ADMIN_SLEEP_SECONDS`
   场景间 sleep，默认 `1`
 - `STORAGE_ENDPOINT_REWRITE_FROM`
-  upload 全量脚本在宿主机执行时，用于把服务返回的容器内对象存储地址改写掉，默认 `http://zhi-file-perf-minio:9000`
+  仅 `upload-all-apis.js` 使用；宿主机执行时可补充对象存储地址改写前缀，支持逗号分隔多个值；脚本内建兼容 `http://host.docker.internal:19000` 和 `http://zhi-file-perf-minio:9000`，显式置空可关闭 rewrite
 - `STORAGE_ENDPOINT_REWRITE_TO`
-  upload 全量脚本改写后的宿主机对象存储地址，默认 `http://127.0.0.1:19000`
+  仅 `upload-all-apis.js` 使用；对象存储地址改写后的宿主机可达地址，默认 `http://127.0.0.1:19000`
 - `UPLOAD_DIRECT_PART_ONE_BYTES`
   upload 全量脚本里 DIRECT multipart 第 1 个分片大小，默认 `5242880`
 - `UPLOAD_DIRECT_PART_TWO_BYTES`
