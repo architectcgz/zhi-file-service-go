@@ -1,0 +1,67 @@
+nameOverride: ""
+fullnameOverride: ""
+component: worker
+replicaCount: 2
+
+image:
+  repository: ghcr.io/architectcgz/zhi-file-service-go/job-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+env:
+  APP_ENV: prod
+  HTTP_PORT: "8080"
+  METRICS_ENABLED: "true"
+  JOB_SCHEDULER_ENABLED: "true"
+  JOB_DEFAULT_BATCH_SIZE: "100"
+  JOB_DEFAULT_MAX_CONCURRENCY: "4"
+  JOB_LOCK_BACKEND: redis
+  JOB_LOCK_TTL: 30s
+  JOB_LOCK_RENEW_INTERVAL: 10s
+  JOB_EXPIRE_UPLOAD_SESSIONS_INTERVAL: 5m
+  JOB_REPAIR_STUCK_COMPLETING_INTERVAL: 2m
+  JOB_FINALIZE_FILE_DELETE_INTERVAL: 1m
+  JOB_FILE_DELETE_RETENTION: 168h
+  JOB_CLEANUP_ORPHAN_BLOBS_INTERVAL: 10m
+  JOB_RECONCILE_TENANT_USAGE_INTERVAL: 30m
+
+secretRefs:
+  - zhi-file-service-shared-secrets
+
+probes:
+  startup:
+    path: /ready
+    periodSeconds: 5
+    failureThreshold: 20
+  readiness:
+    path: /ready
+    periodSeconds: 10
+    failureThreshold: 3
+  liveness:
+    path: /live
+    periodSeconds: 10
+    failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 300m
+    memory: 256Mi
+  limits:
+    cpu: 1500m
+    memory: 1Gi
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+hpa:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  cpuUtilization: 70
+  memoryUtilization: 80
+

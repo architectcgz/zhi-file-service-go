@@ -18,11 +18,15 @@ import (
 	"github.com/architectcgz/zhi-file-service-go/internal/platform/storage"
 )
 
+type RuntimeStartFunc func(context.Context, *App) error
+type RuntimeStopFunc func(context.Context, *App) error
 type RuntimeReadyFunc func(context.Context, *App) error
 
 type RuntimeOptions struct {
 	Handler http.Handler
 	Ready   RuntimeReadyFunc
+	Start   RuntimeStartFunc
+	Stop    RuntimeStopFunc
 }
 
 type Options struct {
@@ -39,11 +43,20 @@ type App struct {
 	DB      *sql.DB
 	Redis   *platformredis.Client
 	Storage *storage.Client
-	Server  *httpserver.Server
+	Server  server
 
 	ready             atomic.Bool
 	runtimeRegistered atomic.Bool
 	runtimeReadyCheck RuntimeReadyFunc
+	runtimeStart      RuntimeStartFunc
+	runtimeStop       RuntimeStopFunc
+}
+
+type server interface {
+	Start() error
+	Shutdown(context.Context) error
+	Handler() http.Handler
+	HasBusinessHandler() bool
 }
 
 func New(ctx context.Context, serviceName string) (*App, error) {
@@ -102,6 +115,13 @@ func (a *App) Run(ctx context.Context) error {
 	if a.Server == nil {
 		return errors.New("http server is not initialized")
 	}
+	if a.runtimeStart != nil {
+		if err := a.runtimeStart(ctx, a); err != nil {
+			a.ready.Store(false)
+			_ = a.Close(context.Background())
+			return fmt.Errorf("start service runtime: %w", err)
+		}
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -110,26 +130,11 @@ func (a *App) Run(ctx context.Context) error {
 
 	select {
 	case err := <-errCh:
-		if err != nil {
-			_ = a.Close(context.Background())
-			return fmt.Errorf("run http server: %w", err)
-		}
-		return a.Close(context.Background())
+		return a.shutdown(context.Background(), err)
 	case <-ctx.Done():
-		a.ready.Store(false)
-		a.runtimeRegistered.Store(false)
-
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.Config.App.ShutdownTimeout)
 		defer cancel()
-
-		var errs []error
-		if err := a.Server.Shutdown(shutdownCtx); err != nil {
-			errs = append(errs, fmt.Errorf("shutdown http server: %w", err))
-		}
-		if err := a.Close(shutdownCtx); err != nil {
-			errs = append(errs, err)
-		}
-		return errors.Join(errs...)
+		return a.shutdown(shutdownCtx, nil)
 	}
 }
 
@@ -233,6 +238,8 @@ func (a *App) initDependencies(ctx context.Context) error {
 
 func (a *App) registerRuntime(options RuntimeOptions) {
 	a.runtimeReadyCheck = options.Ready
+	a.runtimeStart = options.Start
+	a.runtimeStop = options.Stop
 	a.Server = httpserver.New(httpserver.Options{
 		ServiceName:    a.Config.App.ServiceName,
 		HTTP:           a.Config.HTTP,
@@ -241,8 +248,37 @@ func (a *App) registerRuntime(options RuntimeOptions) {
 		MetricsHandler: a.Metrics.Handler(),
 		Handler:        options.Handler,
 	})
-	a.runtimeRegistered.Store(a.Server.HasBusinessHandler() || options.Ready != nil)
+	a.runtimeRegistered.Store(
+		a.Server.HasBusinessHandler() ||
+			options.Ready != nil ||
+			options.Start != nil ||
+			options.Stop != nil,
+	)
 	if !a.runtimeRegistered.Load() && a.Logger != nil {
 		a.Logger.Warn("service_runtime_not_registered", "service", a.Config.App.ServiceName)
 	}
+}
+
+func (a *App) shutdown(ctx context.Context, serveErr error) error {
+	a.ready.Store(false)
+	a.runtimeRegistered.Store(false)
+
+	var errs []error
+	if serveErr != nil {
+		errs = append(errs, fmt.Errorf("run http server: %w", serveErr))
+	}
+	if a.Server != nil {
+		if err := a.Server.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("shutdown http server: %w", err))
+		}
+	}
+	if a.runtimeStop != nil {
+		if err := a.runtimeStop(ctx, a); err != nil {
+			errs = append(errs, fmt.Errorf("stop service runtime: %w", err))
+		}
+	}
+	if err := a.Close(ctx); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
 }

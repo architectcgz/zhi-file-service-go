@@ -1,0 +1,126 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: job-service
+  labels:
+    app.kubernetes.io/name: job-service
+    app.kubernetes.io/part-of: zhi-file-service-go
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: job-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: job-service
+  labels:
+    app.kubernetes.io/name: job-service
+    app.kubernetes.io/part-of: zhi-file-service-go
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 2
+  revisionHistoryLimit: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: job-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: job-service
+        app.kubernetes.io/part-of: zhi-file-service-go
+        app.kubernetes.io/component: worker
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: job-service
+          image: ghcr.io/architectcgz/zhi-file-service-go/job-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: APP_ENV
+              value: "prod"
+            - name: HTTP_PORT
+              value: "8080"
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: JOB_SCHEDULER_ENABLED
+              value: "true"
+            - name: JOB_DEFAULT_BATCH_SIZE
+              value: "100"
+            - name: JOB_DEFAULT_MAX_CONCURRENCY
+              value: "4"
+            - name: JOB_LOCK_BACKEND
+              value: "redis"
+            - name: JOB_LOCK_TTL
+              value: "30s"
+            - name: JOB_LOCK_RENEW_INTERVAL
+              value: "10s"
+            - name: JOB_EXPIRE_UPLOAD_SESSIONS_INTERVAL
+              value: "5m"
+            - name: JOB_REPAIR_STUCK_COMPLETING_INTERVAL
+              value: "2m"
+            - name: JOB_FINALIZE_FILE_DELETE_INTERVAL
+              value: "1m"
+            - name: JOB_FILE_DELETE_RETENTION
+              value: "168h"
+            - name: JOB_CLEANUP_ORPHAN_BLOBS_INTERVAL
+              value: "10m"
+            - name: JOB_RECONCILE_TENANT_USAGE_INTERVAL
+              value: "30m"
+          envFrom:
+            - secretRef:
+                name: zhi-file-service-shared-secrets
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 300m
+              memory: 256Mi
+            limits:
+              cpu: 1500m
+              memory: 1Gi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: job-service
+  labels:
+    app.kubernetes.io/name: job-service
+    app.kubernetes.io/part-of: zhi-file-service-go
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: job-service
+

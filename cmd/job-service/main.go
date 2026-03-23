@@ -8,6 +8,7 @@ import (
 
 	"github.com/architectcgz/zhi-file-service-go/internal/platform/bootstrap"
 	"github.com/architectcgz/zhi-file-service-go/internal/platform/observability"
+	jobruntime "github.com/architectcgz/zhi-file-service-go/internal/services/job/runtime"
 )
 
 func main() {
@@ -22,5 +23,17 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	return bootstrap.Run(ctx, "job-service")
+	app, err := bootstrap.New(ctx, "job-service")
+	if err != nil {
+		return err
+	}
+
+	runtimeOptions, err := jobruntime.Build(app)
+	if err != nil {
+		_ = app.Close(context.Background())
+		return err
+	}
+
+	app.RegisterRuntime(runtimeOptions)
+	return app.Run(ctx)
 }
