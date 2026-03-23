@@ -33,8 +33,8 @@
 - `test/contract/`、`test/e2e/`、`deployments/helm/`、`deployments/kustomize/`、`test/performance/` 均为正式资产，不再是占位目录
 - `Makefile` 与 `scripts/test/{contract,e2e,performance}.sh` 已提供统一验证入口，`delivery-validation` 不再缺统一测试收口
 
-建议执行顺序：
+后续维护说明：
 
-1. 先把 `admin-service` planning 转入归档视角，保留 JWKS/issuer allowlist 已完成事实
-2. 再把 `job-service` planning 转入归档视角，移除 Phase 6 未接线缺口表述
-3. 最后把 `delivery-validation` planning 转入归档视角，以统一测试入口作为后续维护基线
+1. 当前无活跃模块；现有模块均按归档状态维护
+2. 后续若出现新任务，再新增对应 `planning` 目录并按三件套（`task_plan.md`、`findings.md`、`progress.md`）维护
+3. 主工作树若存在本地 `.planning/` 脏改动，不要直接合并 `planning` 分支，先完成人工对比与清理后再合并
