@@ -13,7 +13,7 @@
 配套文档：
 
 - [api-design-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/api-design-spec.md)
-- [data-plane-auth-context-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/data-plane-auth-context-spec.md)
+- [data-plane-auth-context-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/api/data-plane-auth-context-spec.md)
 - [data-model-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/data-model-spec.md)
 - [storage-abstraction-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/storage-abstraction-spec.md)
 
@@ -225,6 +225,12 @@ internal/services/access/
 - `access.download_redirect_ttl`
 - `access.public_url_enabled`
 - `access.private_presign_ttl`
+- `access.auth.jwks`
+- `access.auth.allowed_issuers`
+
+配置原则：
+
+- runtime 默认使用正式 JWKS resolver；`auth_dev.go` 仅用于开发辅助与测试注入
 
 ## 10. 可观测性
 

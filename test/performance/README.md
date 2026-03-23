@@ -2,10 +2,10 @@
 
 这一目录承载 `upload-service` 与 `access-service` 的压测与 Grafana 观测资产，并通过统一脚本入口收口到仓库级验证流程。
 
-当前代码库还没有完整的 north-south 上传 HTTP 运行时接线，因此这里同时提供两类入口：
+这里同时提供两类入口：
 
 - 可立即执行的 Go benchmark
-- 面向后续 HTTP 运行时的 k6 / Prometheus / Grafana 资产
+- 面向已接线 north-south HTTP 运行时的 k6 / Prometheus / Grafana 资产
 
 ## 1. 统一执行入口
 
@@ -32,6 +32,13 @@ PERF_MODE=bench PERF_TARGET=all scripts/test/performance.sh
 - `GO_BIN=/path/to/go`
 - `K6_BIN=/path/to/k6`
 
+`k6` 模式下的 `BEARER_TOKEN` 必须满足当前数据面鉴权契约：
+
+- `aud` 覆盖 `zhi-file-data-plane`
+- `iss` 命中服务配置的 `*_AUTH_ALLOWED_ISSUERS`，或该白名单为空
+- token 已配置进对应服务的 `*_AUTH_JWKS` 可验证范围
+- upload 场景至少带 `file:write`，access 场景至少带 `file:read`
+
 示例：
 
 ```bash
@@ -41,7 +48,7 @@ PERF_MODE=bench PERF_TARGET=upload make test-performance
 ```bash
 PERF_MODE=k6 PERF_TARGET=access \
 BASE_URL=http://127.0.0.1:8081 \
-BEARER_TOKEN=dev-token \
+BEARER_TOKEN=<valid-data-plane-jwt> \
 FILE_ID=file-1 \
 make test-performance
 ```
@@ -82,17 +89,19 @@ go test -run '^$' -bench 'Benchmark(GetFilePublic|ResolveDownloadPrivate|Redirec
 - `test/performance/upload-session-hotpath.js`
 - `test/performance/access-read-hotpath.js`
 
+说明：`BEARER_TOKEN` 需要是可被服务端 JWKS 验签的正式 JWT，且 `aud` 必须包含 `zhi-file-data-plane`。
+
 示例：
 
 ```bash
 BASE_URL=http://127.0.0.1:8080 \
-BEARER_TOKEN=dev-token \
+BEARER_TOKEN=<valid-data-plane-jwt> \
 k6 run test/performance/upload-session-hotpath.js
 ```
 
 ```bash
 BASE_URL=http://127.0.0.1:8080 \
-BEARER_TOKEN=dev-token \
+BEARER_TOKEN=<valid-data-plane-jwt> \
 FILE_ID=file-1 \
 ACCESS_TICKET=at_xxx \
 k6 run test/performance/access-read-hotpath.js
@@ -120,7 +129,7 @@ k6 run test/performance/access-read-hotpath.js
 ```bash
 PERF_MODE=k6 PERF_TARGET=upload \
 BASE_URL=http://127.0.0.1:8080 \
-BEARER_TOKEN=dev-token \
+BEARER_TOKEN=<valid-data-plane-jwt> \
 make test-performance
 ```
 

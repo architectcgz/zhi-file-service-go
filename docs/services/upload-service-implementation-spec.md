@@ -12,7 +12,7 @@
 配套文档：
 
 - [api-design-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/api-design-spec.md)
-- [data-plane-auth-context-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/data-plane-auth-context-spec.md)
+- [data-plane-auth-context-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/api/data-plane-auth-context-spec.md)
 - [upload-integrity-hash-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/upload-integrity-hash-spec.md)
 - [outbox-event-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/outbox-event-spec.md)
 - [upload-session-state-machine-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/upload-session-state-machine-spec.md)
@@ -330,6 +330,8 @@ SQL 约束：
 - `upload.complete_timeout`
 - `upload.presign_ttl`
 - `upload.allowed_modes`
+- `upload.auth.jwks`
+- `upload.auth.allowed_issuers`
 - `storage.public_bucket`
 - `storage.private_bucket`
 
@@ -337,6 +339,7 @@ SQL 约束：
 
 - 所有 TTL 和阈值外置
 - 不把 bucket 名、固定大小阈值写死在代码里
+- runtime 默认使用正式 JWKS resolver；`auth_dev.go` 仅用于开发辅助与测试注入
 
 ## 10. 可观测性
 

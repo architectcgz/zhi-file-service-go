@@ -67,6 +67,7 @@ spec:
             - name: ACCESS_PRIVATE_PRESIGN_TTL
               value: "2m"
           envFrom:
+            # secret 应至少提供 ACCESS_TICKET_SIGNING_KEY、ACCESS_AUTH_JWKS；如需 issuer 白名单，可同时提供 ACCESS_AUTH_ALLOWED_ISSUERS
             - secretRef:
                 name: zhi-file-service-shared-secrets
           startupProbe:
@@ -135,4 +136,3 @@ spec:
         target:
           type: Utilization
           averageUtilization: 80
-

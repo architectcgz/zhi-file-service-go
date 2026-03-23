@@ -79,11 +79,13 @@ type OTELConfig struct {
 }
 
 type UploadConfig struct {
-	MaxInlineSize   int64
-	SessionTTL      time.Duration
-	CompleteTimeout time.Duration
-	PresignTTL      time.Duration
-	AllowedModes    []string
+	MaxInlineSize      int64
+	SessionTTL         time.Duration
+	CompleteTimeout    time.Duration
+	PresignTTL         time.Duration
+	AllowedModes       []string
+	AuthJWKS           string
+	AuthAllowedIssuers []string
 }
 
 type AccessConfig struct {
@@ -92,6 +94,8 @@ type AccessConfig struct {
 	DownloadRedirectTTL time.Duration
 	PublicURLEnabled    bool
 	PrivatePresignTTL   time.Duration
+	AuthJWKS            string
+	AuthAllowedIssuers  []string
 }
 
 type AdminConfig struct {
@@ -201,6 +205,10 @@ func Load(serviceName string) (Config, error) {
 	cfg.OTEL.Endpoint = strings.TrimSpace(os.Getenv("OTEL_ENDPOINT"))
 	cfg.OTEL.ServiceVersion = env("OTEL_SERVICE_VERSION", cfg.OTEL.ServiceVersion)
 	cfg.Access.TicketSigningKey = strings.TrimSpace(os.Getenv("ACCESS_TICKET_SIGNING_KEY"))
+	cfg.Access.AuthJWKS = strings.TrimSpace(os.Getenv("ACCESS_AUTH_JWKS"))
+	cfg.Access.AuthAllowedIssuers = splitCSV(os.Getenv("ACCESS_AUTH_ALLOWED_ISSUERS"))
+	cfg.Upload.AuthJWKS = strings.TrimSpace(os.Getenv("UPLOAD_AUTH_JWKS"))
+	cfg.Upload.AuthAllowedIssuers = splitCSV(os.Getenv("UPLOAD_AUTH_ALLOWED_ISSUERS"))
 	cfg.Admin.AuthJWKS = strings.TrimSpace(os.Getenv("ADMIN_AUTH_JWKS"))
 	cfg.Admin.AuthAllowedIssuers = splitCSV(os.Getenv("ADMIN_AUTH_ALLOWED_ISSUERS"))
 
@@ -472,9 +480,15 @@ func (c Config) Validate() error {
 		if strings.TrimSpace(c.Redis.Addr) == "" {
 			errs = append(errs, errors.New("REDIS_ADDR is required for upload-service and job-service"))
 		}
+		if c.App.ServiceName == ServiceUpload && strings.TrimSpace(c.Upload.AuthJWKS) == "" {
+			errs = append(errs, errors.New("UPLOAD_AUTH_JWKS is required for upload-service"))
+		}
 	case ServiceAccess:
 		if strings.TrimSpace(c.Access.TicketSigningKey) == "" {
 			errs = append(errs, errors.New("ACCESS_TICKET_SIGNING_KEY is required for access-service"))
+		}
+		if strings.TrimSpace(c.Access.AuthJWKS) == "" {
+			errs = append(errs, errors.New("ACCESS_AUTH_JWKS is required for access-service"))
 		}
 	case ServiceAdmin:
 		if strings.TrimSpace(c.Admin.AuthJWKS) == "" {

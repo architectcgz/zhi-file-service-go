@@ -67,6 +67,33 @@ func TestLoadReturnsValidationErrorForUnsupportedUploadMode(t *testing.T) {
 	}
 }
 
+func TestLoadReturnsValidationErrorForMissingUploadAuthJWKS(t *testing.T) {
+	setCommonEnv(t)
+	t.Setenv("REDIS_ADDR", "127.0.0.1:6379")
+	t.Setenv("UPLOAD_AUTH_JWKS", "")
+
+	_, err := Load(ServiceUpload)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "UPLOAD_AUTH_JWKS") {
+		t.Fatalf("expected UPLOAD_AUTH_JWKS error, got: %v", err)
+	}
+}
+
+func TestLoadReturnsValidationErrorForMissingAccessAuthJWKS(t *testing.T) {
+	setCommonEnv(t)
+	t.Setenv("ACCESS_AUTH_JWKS", "")
+
+	_, err := Load(ServiceAccess)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "ACCESS_AUTH_JWKS") {
+		t.Fatalf("expected ACCESS_AUTH_JWKS error, got: %v", err)
+	}
+}
+
 func TestLoadReturnsValidationErrorForInvalidJobLockWindow(t *testing.T) {
 	setCommonEnv(t)
 	t.Setenv("REDIS_ADDR", "127.0.0.1:6379")
@@ -121,6 +148,47 @@ func TestLoadAdminServiceParsesAllowedIssuers(t *testing.T) {
 	}
 }
 
+func TestLoadUploadServiceParsesAllowedIssuers(t *testing.T) {
+	setCommonEnv(t)
+	t.Setenv("REDIS_ADDR", "127.0.0.1:6379")
+	t.Setenv("UPLOAD_AUTH_ALLOWED_ISSUERS", "https://issuer-a.example.com, https://issuer-b.example.com")
+
+	cfg, err := Load(ServiceUpload)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if len(cfg.Upload.AuthAllowedIssuers) != 2 {
+		t.Fatalf("Upload.AuthAllowedIssuers len = %d, want 2", len(cfg.Upload.AuthAllowedIssuers))
+	}
+	if cfg.Upload.AuthAllowedIssuers[0] != "https://issuer-a.example.com" {
+		t.Fatalf("Upload.AuthAllowedIssuers[0] = %q, want %q", cfg.Upload.AuthAllowedIssuers[0], "https://issuer-a.example.com")
+	}
+	if cfg.Upload.AuthAllowedIssuers[1] != "https://issuer-b.example.com" {
+		t.Fatalf("Upload.AuthAllowedIssuers[1] = %q, want %q", cfg.Upload.AuthAllowedIssuers[1], "https://issuer-b.example.com")
+	}
+}
+
+func TestLoadAccessServiceParsesAllowedIssuers(t *testing.T) {
+	setCommonEnv(t)
+	t.Setenv("ACCESS_AUTH_ALLOWED_ISSUERS", "https://issuer-a.example.com, https://issuer-b.example.com")
+
+	cfg, err := Load(ServiceAccess)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if len(cfg.Access.AuthAllowedIssuers) != 2 {
+		t.Fatalf("Access.AuthAllowedIssuers len = %d, want 2", len(cfg.Access.AuthAllowedIssuers))
+	}
+	if cfg.Access.AuthAllowedIssuers[0] != "https://issuer-a.example.com" {
+		t.Fatalf("Access.AuthAllowedIssuers[0] = %q, want %q", cfg.Access.AuthAllowedIssuers[0], "https://issuer-a.example.com")
+	}
+	if cfg.Access.AuthAllowedIssuers[1] != "https://issuer-b.example.com" {
+		t.Fatalf("Access.AuthAllowedIssuers[1] = %q, want %q", cfg.Access.AuthAllowedIssuers[1], "https://issuer-b.example.com")
+	}
+}
+
 func setCommonEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("APP_ENV", "test")
@@ -131,5 +199,7 @@ func setCommonEnv(t *testing.T) {
 	t.Setenv("STORAGE_PUBLIC_BUCKET", "public")
 	t.Setenv("STORAGE_PRIVATE_BUCKET", "private")
 	t.Setenv("ACCESS_TICKET_SIGNING_KEY", "sign-key")
+	t.Setenv("ACCESS_AUTH_JWKS", "jwks")
+	t.Setenv("UPLOAD_AUTH_JWKS", "jwks")
 	t.Setenv("ADMIN_AUTH_JWKS", "jwks")
 }

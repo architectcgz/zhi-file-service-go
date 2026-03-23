@@ -233,13 +233,13 @@ func TestPerformanceScriptRunsK6ScenarioWhenRequested(t *testing.T) {
 	mockK6 := writeMockScript(t, tmpDir, "mock-k6.sh", "#!/usr/bin/env bash\nset -euo pipefail\necho \"$*\" >> \"${LOG_FILE}\"\n")
 
 	out, err := runScript(t, scriptPath, nil, map[string]string{
-		"K6_BIN":   mockK6,
-		"LOG_FILE": logFile,
-		"PERF_MODE": "k6",
-		"PERF_TARGET": "access",
-		"BASE_URL": "http://127.0.0.1:8081",
+		"K6_BIN":       mockK6,
+		"LOG_FILE":     logFile,
+		"PERF_MODE":    "k6",
+		"PERF_TARGET":  "access",
+		"BASE_URL":     "http://127.0.0.1:8081",
 		"BEARER_TOKEN": "dev-token",
-		"FILE_ID": "file-1",
+		"FILE_ID":      "file-1",
 	})
 	if err != nil {
 		t.Fatalf("performance script failed: %v\noutput:\n%s", err, out)
@@ -253,4 +253,55 @@ func TestPerformanceScriptRunsK6ScenarioWhenRequested(t *testing.T) {
 	if !strings.Contains(got, "run") || !strings.Contains(got, "test/performance/access-read-hotpath.js") {
 		t.Fatalf("unexpected k6 command: %q", got)
 	}
+}
+
+func TestDoctorScriptRequiresUploadAuthJWKS(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	scriptPath := filepath.Join(repoRoot, "scripts/tools/doctor.sh")
+
+	env := baseDoctorEnv("upload-service")
+	delete(env, "UPLOAD_AUTH_JWKS")
+
+	out, err := runScript(t, scriptPath, nil, env)
+	if err == nil {
+		t.Fatalf("expected doctor to fail, output:\n%s", out)
+	}
+	if !strings.Contains(out, "UPLOAD_AUTH_JWKS") {
+		t.Fatalf("expected UPLOAD_AUTH_JWKS missing hint, output:\n%s", out)
+	}
+}
+
+func TestDoctorScriptRequiresAccessAuthJWKS(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	scriptPath := filepath.Join(repoRoot, "scripts/tools/doctor.sh")
+
+	env := baseDoctorEnv("access-service")
+	delete(env, "ACCESS_AUTH_JWKS")
+
+	out, err := runScript(t, scriptPath, nil, env)
+	if err == nil {
+		t.Fatalf("expected doctor to fail, output:\n%s", out)
+	}
+	if !strings.Contains(out, "ACCESS_AUTH_JWKS") {
+		t.Fatalf("expected ACCESS_AUTH_JWKS missing hint, output:\n%s", out)
+	}
+}
+
+func baseDoctorEnv(serviceName string) map[string]string {
+	env := map[string]string{
+		"APP_ENV":                   "test",
+		"APP_SERVICE_NAME":          serviceName,
+		"DB_DSN":                    "postgres://test:test@127.0.0.1:5432/test",
+		"STORAGE_ENDPOINT":          "http://127.0.0.1:9000",
+		"STORAGE_ACCESS_KEY":        "key",
+		"STORAGE_SECRET_KEY":        "secret",
+		"STORAGE_PUBLIC_BUCKET":     "public",
+		"STORAGE_PRIVATE_BUCKET":    "private",
+		"REDIS_ADDR":                "127.0.0.1:6379",
+		"UPLOAD_AUTH_JWKS":          "inline-jwks",
+		"ACCESS_TICKET_SIGNING_KEY": "ticket-key",
+		"ACCESS_AUTH_JWKS":          "inline-jwks",
+		"ADMIN_AUTH_JWKS":           "inline-jwks",
+	}
+	return env
 }

@@ -60,10 +60,14 @@ case "${APP_SERVICE_NAME:-}" in
   upload-service)
     check_optional UPLOAD_MAX_INLINE_SIZE "10485760"
     check_optional UPLOAD_SESSION_TTL "24h"
+    check_required UPLOAD_AUTH_JWKS true
+    check_optional UPLOAD_AUTH_ALLOWED_ISSUERS ""
     check_required REDIS_ADDR
     ;;
   access-service)
     check_required ACCESS_TICKET_SIGNING_KEY true
+    check_required ACCESS_AUTH_JWKS true
+    check_optional ACCESS_AUTH_ALLOWED_ISSUERS ""
     check_optional ACCESS_TICKET_TTL "5m"
     ;;
   admin-service)
