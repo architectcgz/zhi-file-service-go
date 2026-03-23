@@ -82,6 +82,26 @@ func TestLoadReturnsValidationErrorForInvalidJobLockWindow(t *testing.T) {
 	}
 }
 
+func TestLoadAdminServiceParsesAllowedIssuers(t *testing.T) {
+	setCommonEnv(t)
+	t.Setenv("ADMIN_AUTH_ALLOWED_ISSUERS", "https://issuer-a.example.com, https://issuer-b.example.com")
+
+	cfg, err := Load(ServiceAdmin)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if len(cfg.Admin.AuthAllowedIssuers) != 2 {
+		t.Fatalf("AuthAllowedIssuers len = %d, want 2", len(cfg.Admin.AuthAllowedIssuers))
+	}
+	if cfg.Admin.AuthAllowedIssuers[0] != "https://issuer-a.example.com" {
+		t.Fatalf("AuthAllowedIssuers[0] = %q, want %q", cfg.Admin.AuthAllowedIssuers[0], "https://issuer-a.example.com")
+	}
+	if cfg.Admin.AuthAllowedIssuers[1] != "https://issuer-b.example.com" {
+		t.Fatalf("AuthAllowedIssuers[1] = %q, want %q", cfg.Admin.AuthAllowedIssuers[1], "https://issuer-b.example.com")
+	}
+}
+
 func setCommonEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("APP_ENV", "test")

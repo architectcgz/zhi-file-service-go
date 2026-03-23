@@ -94,6 +94,31 @@ func TestJWKSAuthResolverRejectsAudienceMismatch(t *testing.T) {
 	}
 }
 
+func TestJWKSAuthResolverRejectsIssuerOutsideAllowlist(t *testing.T) {
+	t.Parallel()
+
+	key := newTestJWKSRSAKey(t, "admin-key-iss")
+	resolver, err := NewJWKSAuthResolverWithIssuers(key.jwksJSON(t), []string{"https://trusted-issuer.example.com"})
+	if err != nil {
+		t.Fatalf("NewJWKSAuthResolverWithIssuers() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/tenants", nil)
+	req.Header.Set("Authorization", "Bearer "+key.signedToken(t, map[string]any{
+		"sub":   "admin-issuer",
+		"roles": []string{string(domain.RoleReadonly)},
+		"iss":   "https://unexpected-issuer.example.com",
+		"aud":   "zhi-file-admin",
+		"iat":   time.Now().Add(-time.Minute).Unix(),
+		"exp":   time.Now().Add(time.Hour).Unix(),
+	}))
+
+	_, err = resolver(req)
+	if code := xerrors.CodeOf(err); code != xerrors.CodeUnauthorized {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, xerrors.CodeUnauthorized, err)
+	}
+}
+
 func TestJWKSAuthResolverRejectsUnknownKeyID(t *testing.T) {
 	t.Parallel()
 

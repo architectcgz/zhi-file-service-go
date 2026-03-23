@@ -32,8 +32,9 @@ const (
 var errUnsupportedJWKSKey = errors.New("unsupported jwks signing key")
 
 type jwksAuthResolver struct {
-	keySet *jwksKeySet
-	now    func() time.Time
+	keySet         *jwksKeySet
+	allowedIssuers map[string]struct{}
+	now            func() time.Time
 }
 
 type jwksKeySet struct {
@@ -74,14 +75,19 @@ type jwtHeader struct {
 type jwtClaims map[string]json.RawMessage
 
 func NewJWKSAuthResolver(source string) (AuthFunc, error) {
+	return NewJWKSAuthResolverWithIssuers(source, nil)
+}
+
+func NewJWKSAuthResolverWithIssuers(source string, allowedIssuers []string) (AuthFunc, error) {
 	keySet, err := newJWKSKeySet(source)
 	if err != nil {
 		return nil, fmt.Errorf("new jwks key set: %w", err)
 	}
 
 	resolver := jwksAuthResolver{
-		keySet: keySet,
-		now:    time.Now,
+		keySet:         keySet,
+		allowedIssuers: normalizeStringSet(allowedIssuers),
+		now:            time.Now,
 	}
 	return resolver.resolve, nil
 }
@@ -107,6 +113,15 @@ func (r jwksAuthResolver) resolve(req *http.Request) (domain.AdminContext, error
 		}
 		key, retryErr := r.keySet.refreshKey(header.KeyID)
 		if retryErr != nil || verifyJWTWithKey(header, key, signingInput, signature) != nil {
+			return domain.AdminContext{}, newUnauthorizedAuthError()
+		}
+	}
+	issuer, err := requiredStringClaim(claims, "iss")
+	if err != nil {
+		return domain.AdminContext{}, newUnauthorizedAuthError()
+	}
+	if len(r.allowedIssuers) > 0 {
+		if _, ok := r.allowedIssuers[issuer]; !ok {
 			return domain.AdminContext{}, newUnauthorizedAuthError()
 		}
 	}
@@ -639,4 +654,23 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeStringSet(values []string) map[string]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+
+	result := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		result[trimmed] = struct{}{}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }

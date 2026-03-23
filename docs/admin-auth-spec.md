@@ -88,6 +88,16 @@
 | `jti` | string | token ID |
 | `name` | string | 管理员展示名 |
 
+## 4.3 issuer allowlist
+
+`admin-service` 默认要求 `iss` claim 存在。
+
+如果部署时配置了 `ADMIN_AUTH_ALLOWED_ISSUERS`：
+
+- `iss` 必须命中白名单中的某一项
+- 白名单为空时，只校验 `iss` 存在，不做 pinning
+- 建议生产环境显式配置，避免接入多个来源时出现误收 token
+
 ## 5. 标准化管理员上下文
 
 推荐运行时结构：

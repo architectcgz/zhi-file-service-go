@@ -21,7 +21,7 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 	if app.DB == nil {
 		return bootstrap.RuntimeOptions{}, fmt.Errorf("bootstrap database is nil")
 	}
-	authResolver, err := httptransport.NewJWKSAuthResolver(app.Config.Admin.AuthJWKS)
+	authResolver, err := httptransport.NewJWKSAuthResolverWithIssuers(app.Config.Admin.AuthJWKS, app.Config.Admin.AuthAllowedIssuers)
 	if err != nil {
 		return bootstrap.RuntimeOptions{}, fmt.Errorf("build admin auth resolver: %w", err)
 	}

@@ -96,6 +96,7 @@ type AccessConfig struct {
 
 type AdminConfig struct {
 	AuthJWKS             string
+	AuthAllowedIssuers   []string
 	DeleteRequiresReason bool
 	ListDefaultLimit     int
 	ListMaxLimit         int
@@ -197,6 +198,7 @@ func Load(serviceName string) (Config, error) {
 	cfg.OTEL.ServiceVersion = env("OTEL_SERVICE_VERSION", cfg.OTEL.ServiceVersion)
 	cfg.Access.TicketSigningKey = strings.TrimSpace(os.Getenv("ACCESS_TICKET_SIGNING_KEY"))
 	cfg.Admin.AuthJWKS = strings.TrimSpace(os.Getenv("ADMIN_AUTH_JWKS"))
+	cfg.Admin.AuthAllowedIssuers = splitCSV(os.Getenv("ADMIN_AUTH_ALLOWED_ISSUERS"))
 
 	var errs []error
 

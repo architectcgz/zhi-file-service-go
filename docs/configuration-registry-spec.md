@@ -245,6 +245,7 @@ type Config struct {
 | 逻辑键 | 环境变量 | 类型 | 必填 | Secret | 默认值 | 说明 |
 |------|------|------|------|------|------|------|
 | `admin.auth.jwks` | `ADMIN_AUTH_JWKS` | json/url | 是 | 是 | 无 | 管理面认证密钥或 JWKS 地址 |
+| `admin.auth.allowed_issuers` | `ADMIN_AUTH_ALLOWED_ISSUERS` | csv | 否 | 否 | 空 | 管理面允许的 `iss` 白名单，空表示只校验 claim 存在 |
 | `admin.delete_requires_reason` | `ADMIN_DELETE_REQUIRES_REASON` | bool | 否 | 否 | `true` | 删除是否强制 reason |
 | `admin.list_default_limit` | `ADMIN_LIST_DEFAULT_LIMIT` | int | 否 | 否 | `50` | 列表默认大小 |
 | `admin.list_max_limit` | `ADMIN_LIST_MAX_LIMIT` | int | 否 | 否 | `200` | 列表最大大小 |
