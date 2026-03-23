@@ -1,9 +1,11 @@
 package storageinfra
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -138,6 +140,37 @@ func TestPresignPutObjectReturnsURLAndHeaders(t *testing.T) {
 	}
 }
 
+func TestPutObjectBuffersNonSeekableReader(t *testing.T) {
+	payload := []byte("hello world")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/private-bucket/tenant-a/uploads/file.txt" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll() error = %v", err)
+		}
+		if string(data) != string(payload) {
+			t.Fatalf("payload = %q, want %q", string(data), string(payload))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	adapter := newAdapterForTest(t, server.URL)
+	err := adapter.PutObject(context.Background(), pkgstorage.ObjectRef{
+		Provider:   pkgstorage.ProviderS3,
+		BucketName: "private-bucket",
+		ObjectKey:  "tenant-a/uploads/file.txt",
+	}, "text/plain", onlyReader{r: bytes.NewBuffer(payload)}, int64(len(payload)))
+	if err != nil {
+		t.Fatalf("PutObject() error = %v", err)
+	}
+}
+
 func newAdapterForTest(t *testing.T, endpoint string) *Adapter {
 	t.Helper()
 
@@ -177,4 +210,12 @@ func mustHex(t *testing.T, value string) []byte {
 		t.Fatalf("decode hex %q: %v", value, err)
 	}
 	return decoded
+}
+
+type onlyReader struct {
+	r io.Reader
+}
+
+func (o onlyReader) Read(p []byte) (int, error) {
+	return o.r.Read(p)
 }

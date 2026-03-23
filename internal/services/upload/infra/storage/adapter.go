@@ -1,6 +1,7 @@
 package storageinfra
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -103,6 +104,14 @@ func (a *Adapter) PutObject(ctx context.Context, ref pkgstorage.ObjectRef, conte
 	if err := ref.Validate(); err != nil {
 		return err
 	}
+	if body == nil {
+		return fmt.Errorf("put object body is nil")
+	}
+
+	body, err := ensureSeekableBody(body)
+	if err != nil {
+		return err
+	}
 
 	input := &s3.PutObjectInput{
 		Bucket:      aws.String(ref.BucketName),
@@ -118,6 +127,20 @@ func (a *Adapter) PutObject(ctx context.Context, ref pkgstorage.ObjectRef, conte
 		return mapStorageError(err)
 	}
 	return nil
+}
+
+func ensureSeekableBody(body io.Reader) (io.Reader, error) {
+	if seekable, ok := body.(io.ReadSeeker); ok {
+		return seekable, nil
+	}
+
+	payload, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("read object body: %w", err)
+	}
+
+	// Inline uploads are size-limited; buffering here keeps S3-compatible SDKs working on non-TLS endpoints.
+	return bytes.NewReader(payload), nil
 }
 
 func (a *Adapter) CreateMultipartUpload(ctx context.Context, ref pkgstorage.ObjectRef, contentType string) (string, error) {

@@ -16,6 +16,7 @@ import (
 	pkgstorage "github.com/architectcgz/zhi-file-service-go/pkg/storage"
 	"github.com/architectcgz/zhi-file-service-go/pkg/xerrors"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const (
@@ -703,8 +704,8 @@ func scanTenantPolicy(scanner interface{ Scan(...any) error }) (*ports.TenantPol
 		&maxStorageBytes,
 		&maxFileCount,
 		&maxSingleFileSize,
-		&allowedMimeTypes,
-		&allowedExtensions,
+		pgtype.NewMap().SQLScanner(&allowedMimeTypes),
+		pgtype.NewMap().SQLScanner(&allowedExtensions),
 		&defaultAccessLevel,
 		&autoCreateEnabled,
 		&view.CreatedAt,

@@ -12,6 +12,7 @@ import (
 	"github.com/architectcgz/zhi-file-service-go/pkg/ids"
 	pkgstorage "github.com/architectcgz/zhi-file-service-go/pkg/storage"
 	"github.com/architectcgz/zhi-file-service-go/pkg/xerrors"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type SessionRepository struct {
@@ -580,7 +581,7 @@ FROM tenant.tenant_policies
 WHERE tenant_id = $1`, tenantID)
 	var maxSingleFileSize int64
 	var allowedMimeTypes []string
-	if err := row.Scan(&maxSingleFileSize, &allowedMimeTypes); err != nil {
+	if err := row.Scan(&maxSingleFileSize, pgtype.NewMap().SQLScanner(&allowedMimeTypes)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ports.TenantUploadPolicy{}, xerrors.New(xerrors.CodeForbidden, "tenant policy is not configured", xerrors.Details{
 				"tenantId": tenantID,
@@ -593,7 +594,7 @@ WHERE tenant_id = $1`, tenantID)
 		AllowMultipart:    true,
 		MaxInlineSize:     maxSingleFileSize,
 		MaxFileSize:       maxSingleFileSize,
-		AllowedMimeTypes:  allowedMimeTypes,
+		AllowedMimeTypes:  append([]string(nil), allowedMimeTypes...),
 	}, nil
 }
 
