@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: upload-service
+  labels:
+    app.kubernetes.io/name: upload-service
+    app.kubernetes.io/part-of: zhi-file-service-go
+    app.kubernetes.io/component: data-plane
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: upload-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: upload-service
+  labels:
+    app.kubernetes.io/name: upload-service
+    app.kubernetes.io/part-of: zhi-file-service-go
+    app.kubernetes.io/component: data-plane
+spec:
+  replicas: 2
+  revisionHistoryLimit: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: upload-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: upload-service
+        app.kubernetes.io/part-of: zhi-file-service-go
+        app.kubernetes.io/component: data-plane
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: upload-service
+          image: ghcr.io/architectcgz/zhi-file-service-go/upload-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: APP_ENV
+              value: "prod"
+            - name: HTTP_PORT
+              value: "8080"
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: UPLOAD_MAX_INLINE_SIZE
+              value: "10485760"
+            - name: UPLOAD_SESSION_TTL
+              value: "24h"
+            - name: UPLOAD_COMPLETE_TIMEOUT
+              value: "30s"
+            - name: UPLOAD_PRESIGN_TTL
+              value: "15m"
+            - name: UPLOAD_ALLOWED_MODES
+              value: "INLINE,PRESIGNED_SINGLE,DIRECT"
+          envFrom:
+            - secretRef:
+                name: zhi-file-service-shared-secrets
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 1Gi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: upload-service
+  labels:
+    app.kubernetes.io/name: upload-service
+    app.kubernetes.io/part-of: zhi-file-service-go
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: upload-service
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: upload-service
+  labels:
+    app.kubernetes.io/name: upload-service
+    app.kubernetes.io/part-of: zhi-file-service-go
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: upload-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+

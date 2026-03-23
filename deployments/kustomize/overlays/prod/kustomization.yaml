@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: zhi-file-prod
+resources:
+  - ../../base
+images:
+  - name: ghcr.io/architectcgz/zhi-file-service-go/access-service
+    newTag: prod
+  - name: ghcr.io/architectcgz/zhi-file-service-go/upload-service
+    newTag: prod
+  - name: ghcr.io/architectcgz/zhi-file-service-go/admin-service
+    newTag: prod
+  - name: ghcr.io/architectcgz/zhi-file-service-go/job-service
+    newTag: prod
+replicas:
+  - name: access-service
+    count: 2
+  - name: upload-service
+    count: 2
+  - name: admin-service
+    count: 2
+  - name: job-service
+    count: 2
+

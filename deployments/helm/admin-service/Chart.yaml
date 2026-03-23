@@ -1,0 +1,7 @@
+apiVersion: v2
+name: admin-service
+description: Helm chart for zhi-file-service-go admin-service
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
