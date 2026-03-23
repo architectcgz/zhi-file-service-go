@@ -14,8 +14,8 @@
 配套文档：
 
 - [api-design-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/api-design-spec.md)
-- [upload-service-implementation-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/upload-service-implementation-spec.md)
-- [access-service-implementation-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/access-service-implementation-spec.md)
+- [upload-service-implementation-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/services/upload-service-implementation-spec.md)
+- [access-service-implementation-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/services/access-service-implementation-spec.md)
 - [data-model-spec.md](/home/azhi/workspace/projects/zhi-file-service-go/docs/data-model-spec.md)
 
 ## 2. 适用范围
@@ -60,6 +60,20 @@
 进入 use case 之前，transport / middleware 必须把认证结果标准化成统一的 `AuthContext`。
 
 业务代码只读取 `AuthContext`，不直接解析 JWT claim 或 header。
+
+当前实现收口为两层：
+
+- 共享平台层：`internal/platform/auth/dataplane` 负责 Bearer 提取、JWKS 加载/缓存/刷新、JWT 签名与标准 claim 校验，输出标准化 claims
+- 服务 transport 层：`upload-service` / `access-service` 只做薄映射，把标准化 claims 映射到各自 `domain.AuthContext`
+
+`auth_dev.go` 仅保留为开发辅助代码，不作为默认 runtime 鉴权路径。
+
+对应配置键固定为：
+
+- `UPLOAD_AUTH_JWKS`
+- `UPLOAD_AUTH_ALLOWED_ISSUERS`
+- `ACCESS_AUTH_JWKS`
+- `ACCESS_AUTH_ALLOWED_ISSUERS`
 
 ### 3.3 `tenant_id` 与 `owner_id` 的来源固定
 

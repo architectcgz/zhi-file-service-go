@@ -3,8 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 
 	"github.com/architectcgz/zhi-file-service-go/internal/platform/bootstrap"
 	"github.com/architectcgz/zhi-file-service-go/internal/services/access/app/commands"
@@ -18,13 +16,6 @@ import (
 	"github.com/architectcgz/zhi-file-service-go/pkg/clock"
 )
 
-const (
-	defaultDevToken       = "dev-token"
-	defaultDevTenantID    = "demo"
-	defaultDevSubjectID   = "dev-user"
-	defaultDevSubjectType = "USER"
-)
-
 func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 	if app == nil {
 		return bootstrap.RuntimeOptions{}, fmt.Errorf("bootstrap app is nil")
@@ -34,6 +25,10 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 	}
 	if app.Storage == nil {
 		return bootstrap.RuntimeOptions{}, fmt.Errorf("bootstrap storage is nil")
+	}
+	authResolver, err := httptransport.NewJWKSAuthResolverWithIssuers(app.Config.Access.AuthJWKS, app.Config.Access.AuthAllowedIssuers)
+	if err != nil {
+		return bootstrap.RuntimeOptions{}, fmt.Errorf("build access auth resolver: %w", err)
 	}
 
 	fileRepo := accesspostgres.NewFileReadRepository(app.DB)
@@ -84,7 +79,7 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 	)
 
 	handler := httptransport.NewHandler(httptransport.Options{
-		Auth:                   httptransport.NewDevelopmentAuthResolver(developmentAuthConfig()),
+		Auth:                   authResolver,
 		GetFile:                getFile,
 		CreateAccessTicket:     createTicket,
 		ResolveDownload:        resolveDownload,
@@ -100,46 +95,4 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 			return nil
 		},
 	}, nil
-}
-
-func developmentAuthConfig() httptransport.DevelopmentAuthConfig {
-	return httptransport.DevelopmentAuthConfig{
-		Token:       firstNonEmpty(os.Getenv("ACCESS_DEV_TOKEN"), defaultDevToken),
-		TenantID:    firstNonEmpty(os.Getenv("ACCESS_DEV_TENANT_ID"), defaultDevTenantID),
-		SubjectID:   firstNonEmpty(os.Getenv("ACCESS_DEV_SUBJECT_ID"), defaultDevSubjectID),
-		SubjectType: firstNonEmpty(os.Getenv("ACCESS_DEV_SUBJECT_TYPE"), defaultDevSubjectType),
-		ClientID:    strings.TrimSpace(os.Getenv("ACCESS_DEV_CLIENT_ID")),
-		TokenID:     strings.TrimSpace(os.Getenv("ACCESS_DEV_TOKEN_ID")),
-		Scopes:      splitCSV(os.Getenv("ACCESS_DEV_SCOPES")),
-	}
-}
-
-func splitCSV(value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-
-	items := strings.Split(value, ",")
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		result = append(result, item)
-	}
-	if len(result) == 0 {
-		return nil
-	}
-	return result
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }

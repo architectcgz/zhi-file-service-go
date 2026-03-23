@@ -22,6 +22,7 @@ env:
   ACCESS_PRIVATE_PRESIGN_TTL: 2m
 
 secretRefs:
+  # secret 应至少提供 ACCESS_TICKET_SIGNING_KEY、ACCESS_AUTH_JWKS；如需 issuer 白名单，可同时提供 ACCESS_AUTH_ALLOWED_ISSUERS
   - zhi-file-service-shared-secrets
 
 probes:
@@ -56,4 +57,3 @@ hpa:
   maxReplicas: 10
   cpuUtilization: 70
   memoryUtilization: 80
-

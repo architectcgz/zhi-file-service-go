@@ -229,6 +229,8 @@ type Config struct {
 | `upload.complete_timeout` | `UPLOAD_COMPLETE_TIMEOUT` | duration | 否 | 否 | `30s` | complete 内部超时 |
 | `upload.presign_ttl` | `UPLOAD_PRESIGN_TTL` | duration | 否 | 否 | `15m` | presign 过期时间 |
 | `upload.allowed_modes` | `UPLOAD_ALLOWED_MODES` | csv | 否 | 否 | `INLINE,PRESIGNED_SINGLE,DIRECT` | 允许上传模式 |
+| `upload.auth.jwks` | `UPLOAD_AUTH_JWKS` | json/url | 是 | 是 | 无 | upload 数据面鉴权 JWKS（JSON 或 URL） |
+| `upload.auth.allowed_issuers` | `UPLOAD_AUTH_ALLOWED_ISSUERS` | csv | 否 | 否 | 空 | upload 数据面允许的 `iss` 白名单，空表示只校验 claim 存在 |
 
 ## 6.2 `access-service`
 
@@ -239,6 +241,8 @@ type Config struct {
 | `access.download_redirect_ttl` | `ACCESS_DOWNLOAD_REDIRECT_TTL` | duration | 否 | 否 | `2m` | 跳转地址 TTL |
 | `access.public_url_enabled` | `ACCESS_PUBLIC_URL_ENABLED` | bool | 否 | 否 | `true` | public URL 开关 |
 | `access.private_presign_ttl` | `ACCESS_PRIVATE_PRESIGN_TTL` | duration | 否 | 否 | `2m` | private presign TTL |
+| `access.auth.jwks` | `ACCESS_AUTH_JWKS` | json/url | 是 | 是 | 无 | access 数据面鉴权 JWKS（JSON 或 URL） |
+| `access.auth.allowed_issuers` | `ACCESS_AUTH_ALLOWED_ISSUERS` | csv | 否 | 否 | 空 | access 数据面允许的 `iss` 白名单，空表示只校验 claim 存在 |
 
 ## 6.3 `admin-service`
 
@@ -282,6 +286,8 @@ type Config struct {
 - `STORAGE_ACCESS_KEY`
 - `STORAGE_SECRET_KEY`
 - `ACCESS_TICKET_SIGNING_KEY`
+- `UPLOAD_AUTH_JWKS`
+- `ACCESS_AUTH_JWKS`
 - `ADMIN_AUTH_JWKS` 或其等价敏感配置
 
 要求：
