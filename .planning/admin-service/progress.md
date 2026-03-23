@@ -2,10 +2,11 @@
 
 ## Status
 
-- `completed`
+- `in_progress`
 
 ## Notes
 
-- 已完成租户管理、管理员命令与查询骨架，以及 `AdminContext`、角色矩阵、tenant scope、destructive reason guard 等控制面约束
-- Phase 5 已补强 tenant 列表分页 cursor 校验、destructive reason 校验、delete idempotency 和 tenant scope 测试覆盖
-- 当前代码已合并回 `leader/batch1-foundation` 并通过 `go test ./...` 与目标服务 `-race` 校验
+- 已完成控制面规则层、Postgres 仓储、HTTP handler、runtime 注册与 `cmd/admin-service` 启动接线
+- 已补齐 handler/runtime 测试，并验证目标范围 `go test`、`go test -race` 可通过
+- 当前残余缺口不再是“服务不可运行”，而是管理面鉴权仍停留在 `auth_dev.go` 开发态 resolver，尚未切到真实 JWKS / 生产认证链路
+- 下一步应聚焦生产鉴权替换与对应配置、ready/错误语义复核

@@ -2,7 +2,7 @@
 
 ## Goal
 
-落后台调度、分布式锁、清理、补偿、修复与对账任务，确保多实例下不会重复调度或误删对象。
+把 job-service 从“调度与任务编排骨架”推进到“多实例可运行的后台服务”，确保锁、runner、补偿和清理任务真正能执行。
 
 ## Inputs
 
@@ -10,37 +10,52 @@
 - `docs/outbox-event-spec.md`
 - `docs/data-protection-recovery-spec.md`
 - `docs/deployment-runtime-spec.md`
+- `docs/test-validation-spec.md`
 
 ## Phases
 
-### Phase 1
+### Phase 1 (`completed`)
 
 - 落 scheduler / worker 模型
 - 落 distributed locker 抽象
 
-### Phase 2
+### Phase 2 (`completed`)
 
 - 实现 expire session / repair completing / finalize delete / cleanup orphan / reconcile usage / cleanup multipart
 
-### Phase 3
+### Phase 3 (`completed`)
 
-- 接入 outbox、失败重试、幂等和多实例领取控制
+- 实现 `infra/postgres` 仓储与分布式锁
+- 实现 `infra/storage` / `infra/runner`，把 jobs 所需依赖接到真实资源
+- 明确 outbox 读取、ack、重试与任务 side effect 的基础设施边界
 
-### Phase 4
+### Phase 4 (`completed`)
 
-- 接入指标、日志、trace、任务健康信息
+- 构建 runtime，接入 scheduler 生命周期、ready check、graceful shutdown
+- 修改 `cmd/job-service` 为显式 runtime 注册，而不是空跑 `bootstrap.Run(...)`
+- 按设计决定是否只暴露 probe/metrics，还是增加最小管理 HTTP handler
 
-### Phase 5
+### Phase 5 (`completed`)
 
-- 补分布式锁、接管、幂等、repair/reconcile 测试
+- 补真实 locker、接管、幂等、repair/reconcile、cleanup multipart 的集成测试
+- 跑 `go test` / `-race`，验证多实例竞争下不会重复调度或误删对象
+
+### Phase 6 (`pending`)
+
+- 把 `process_outbox_events`、`cleanup_multipart` 等剩余任务接进 runtime scheduler
+- 为 `delivery-validation` 提供 job 相关 e2e 输入：逻辑删除后物理清理、过期 session 收敛、tenant usage 对账
+- 补充运行与发布说明，确保多副本部署前提写清楚
 
 ## Deliverables
 
 - `internal/services/job`
-- 对应 scheduler / runner / infra / tests
+- `cmd/job-service`
+- 对应 scheduler / runner / infra / runtime / tests
 
 ## Exit Criteria
 
 - 多实例 cleanup / repair / reconcile 全部依赖分布式锁
 - outbox 驱动任务与主事务边界一致
+- scheduler 已真正接入进程生命周期，`/ready` 能反映 runtime 状态
 - 关键任务失败、重试、接管行为可验证
+- 剩余 task 未注册进 runtime 前，本模块不能从活跃列表移除
