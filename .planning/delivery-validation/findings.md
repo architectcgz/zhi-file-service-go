@@ -9,7 +9,7 @@
 
 ## Implementation Findings
 
-- `Makefile` 已声明 `test-contract`、`test-e2e`，但当前 `scripts/test/contract.sh` 只做 OpenAPI YAML 校验
-- `test/contract/` 与 `test/e2e/` 目前只有 `.gitkeep`
-- `deployments/helm`、`deployments/kustomize` 目前也只有占位目录
-- `test/performance/` 目前只有 upload-service 的 benchmark / k6 / Prometheus / Grafana 资产
+- `Makefile` 已声明并接通 `test-contract`、`test-e2e`、`test-performance`；`scripts/test/contract.sh`、`scripts/test/e2e.sh`、`scripts/test/performance.sh` 都是实际可执行入口
+- `test/contract/` 已包含 upload/access/admin 契约测试，`test/e2e/` 已包含跨服务 HTTP 闭环测试
+- `deployments/helm/*` 与 `deployments/kustomize/{base,overlays}` 已是正式部署资产，而非占位目录
+- `test/performance/README.md` 已统一说明 benchmark、k6、Prometheus、Grafana；性能资产已覆盖 upload-service 与 access-service

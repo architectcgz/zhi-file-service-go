@@ -2,11 +2,11 @@
 
 ## Status
 
-- `in_progress`
+- `completed`
 
 ## Notes
 
 - 已完成 scheduler / worker 模型、Redis 分布式锁、Postgres 仓储、runner 与 runtime 生命周期接线
 - 已补强分布式锁 acquire/release/takeover、runner 启停、`go test -race` 等关键验证
-- 当前残余缺口在于 runtime 只注册了核心维护任务；`process_outbox_events`、`cleanup_multipart` 仍未进入运行时调度，也还没有对应跨服务 e2e 闭环
-- 下一步应先补全 job 注册清单，再把 admin delete / upload fail 等链路接到 delivery-validation 的系统级验证
+- runtime catalog 已把 `process_outbox_events`、`cleanup_multipart` 以及其余维护任务注册进 scheduler；不再存在“剩余任务未接进运行时”的 Phase 6 缺口
+- runtime/unit/integration 测试已覆盖 admin 逻辑删除 -> outbox -> 物理清理，以及 upload fail -> outbox -> multipart cleanup 的闭环验证

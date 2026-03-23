@@ -9,7 +9,8 @@
 
 ## Implementation Findings
 
-- `scheduler`、`jobs`、`outbox consumer` 和 observability 接缝已落地，应用层测试也已覆盖关键边界
-- `infra/postgres`、`infra/runner`、`infra/storage` 仍为空目录，分布式锁和仓储还没有真实实现
-- `cmd/job-service/main.go` 当前仅调用 `bootstrap.Run(...)`，没有 runtime ready check，也没有把 scheduler 真正挂进进程生命周期
-- `job-service` 第一阶段不要求完整 north-south 业务 API，但至少需要健康检查、调度生命周期管理和多实例锁实现
+- `scheduler`、`jobs`、`outbox consumer`、observability、`infra/postgres`、`infra/runner`、`infra/storage` 均已落地，应用层与运行时测试覆盖关键边界
+- `cmd/job-service/main.go` 当前通过 `bootstrap.New(...) -> jobruntime.Build(...) -> app.RegisterRuntime(...)` 启动，scheduler 已挂进进程生命周期并受 readiness/start/stop 管理
+- `runtime/catalog.go` 已注册 `process_outbox_events`、`cleanup_multipart` 在内的七类周期任务，不再只停留在库级实现
+- `runtime_integration_test.go` 已覆盖 admin delete -> outbox -> finalize physical delete，以及 upload fail -> outbox -> cleanup multipart 的系统级闭环
+- `job-service` 当前仍以后台 runtime 为主，不要求完整 north-south 业务 API；健康检查、调度生命周期管理和多实例锁实现已具备

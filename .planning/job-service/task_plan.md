@@ -2,15 +2,15 @@
 
 ## Goal
 
-把 job-service 从“调度与任务编排骨架”推进到“多实例可运行的后台服务”，确保锁、runner、补偿和清理任务真正能执行。
+把 job-service 从“调度与任务编排骨架”推进到“多实例可运行的后台服务”，确保锁、runner、补偿和清理任务真正能执行，并完成 Phase 6 runtime 收口。
 
 ## Inputs
 
-- `docs/job-service-implementation-spec.md`
-- `docs/outbox-event-spec.md`
-- `docs/data-protection-recovery-spec.md`
-- `docs/deployment-runtime-spec.md`
-- `docs/test-validation-spec.md`
+- `docs/services/job-service-implementation-spec.md`
+- `docs/api/outbox-event-spec.md`
+- `docs/ops/data-protection-recovery-spec.md`
+- `docs/ops/deployment-runtime-spec.md`
+- `docs/dev/test-validation-spec.md`
 
 ## Phases
 
@@ -40,11 +40,11 @@
 - 补真实 locker、接管、幂等、repair/reconcile、cleanup multipart 的集成测试
 - 跑 `go test` / `-race`，验证多实例竞争下不会重复调度或误删对象
 
-### Phase 6 (`pending`)
+### Phase 6 (`completed`)
 
-- 把 `process_outbox_events`、`cleanup_multipart` 等剩余任务接进 runtime scheduler
-- 为 `delivery-validation` 提供 job 相关 e2e 输入：逻辑删除后物理清理、过期 session 收敛、tenant usage 对账
-- 补充运行与发布说明，确保多副本部署前提写清楚
+- 把 `process_outbox_events`、`cleanup_multipart` 与其余维护任务接进 runtime scheduler，并由 `buildScheduledJobs(...)` 统一编目
+- 为验证链路补齐 job 相关闭环：逻辑删除后物理清理、upload fail 后 outbox 消费与 multipart cleanup
+- 对齐运行与配置说明，补齐 interval / lock / scheduler 相关配置键
 
 ## Deliverables
 
@@ -58,4 +58,4 @@
 - outbox 驱动任务与主事务边界一致
 - scheduler 已真正接入进程生命周期，`/ready` 能反映 runtime 状态
 - 关键任务失败、重试、接管行为可验证
-- 剩余 task 未注册进 runtime 前，本模块不能从活跃列表移除
+- `process_outbox_events`、`cleanup_multipart` 等关键任务已注册进 runtime，本模块可从活跃列表移除

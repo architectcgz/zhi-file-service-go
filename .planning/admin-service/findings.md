@@ -9,7 +9,8 @@
 
 ## Implementation Findings
 
-- `domain`、`app/commands`、`app/queries` 已落地，并已有针对 tenant scope、cursor、destructive reason、delete idempotency 的测试
-- `infra/postgres`、`infra/storage`、`transport/http` 目前仍为空目录，没有真正的仓储、HTTP handler 和 runtime 装配
-- `cmd/admin-service/main.go` 当前仅调用 `bootstrap.Run(...)`，没有注册 runtime，按平台层设计 `readiness` 不会通过
-- OpenAPI 已是正式契约，后续实现必须直接以 `api/openapi/admin-service.yaml` 为 north-south 合同，而不是再发明一套接口
+- `domain`、`app/commands`、`app/queries`、`infra/postgres`、`transport/http` 与 runtime 已落地，并已有针对 tenant scope、cursor、destructive reason、delete idempotency 的测试
+- `cmd/admin-service/main.go` 当前通过 `bootstrap.New(...) -> adminruntime.Build(...) -> app.RegisterRuntime(...)` 启动，`/ready` 由 runtime 表检查驱动
+- runtime 通过 `NewJWKSAuthResolverWithIssuers(...)` 装配 JWKS 鉴权，并读取 `ADMIN_AUTH_JWKS`、`ADMIN_AUTH_ALLOWED_ISSUERS`
+- `auth_jwks_test.go` 与 `runtime_auth_test.go` 已覆盖 inline/remote JWKS、密钥轮换、audience 校验、issuer allowlist 与无效配置失败路径
+- OpenAPI 已是正式契约，当前实现直接以 `api/openapi/admin-service.yaml` 为 north-south 合同

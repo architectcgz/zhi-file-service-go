@@ -2,14 +2,14 @@
 
 ## Goal
 
-补齐仓库级交付能力，让 zhi-file-service-go 不只是“代码能编译测试”，还具备 contract、e2e、部署和统一验证入口。
+补齐仓库级交付能力，让 zhi-file-service-go 不只是“代码能编译测试”，还具备 contract、e2e、部署和统一验证入口，并完成统一测试收口。
 
 ## Inputs
 
-- `docs/test-validation-spec.md`
-- `docs/deployment-runtime-spec.md`
-- `docs/development-workflow-spec.md`
-- `docs/slo-observability-spec.md`
+- `docs/dev/test-validation-spec.md`
+- `docs/ops/deployment-runtime-spec.md`
+- `docs/dev/development-workflow-spec.md`
+- `docs/ops/slo-observability-spec.md`
 - `api/openapi/upload-service.yaml`
 - `api/openapi/access-service.yaml`
 - `api/openapi/admin-service.yaml`
@@ -35,11 +35,11 @@
 - 补 `deployments/kustomize/base` 与 `overlays/{dev,test,prod}`
 - 对齐资源配额、探针、HPA/PDB、配置注入和对象存储/数据库依赖
 
-### Phase 4 (`pending`)
+### Phase 4 (`completed`)
 
-- 收口 `test/performance/` 目录，把 access 及后续服务性能资产纳入统一入口
-- 增加 Prometheus/Grafana 说明，避免 dashboard 只存在 JSON 文件而无法复现
-- 让 `make test-contract`、`make test-e2e`、必要时 `make test-performance` 真正可执行
+- 收口 `test/performance/` 目录，把 access 性能资产纳入统一入口，并提供 bench/k6 两类执行模式
+- 增加 Prometheus/Grafana 说明，明确 dashboard 复现方式与抓取模板
+- 让 `make test-contract`、`make test-e2e`、`make test-performance` 通过 `scripts/test/*.sh` 成为真实可执行入口
 
 ## Deliverables
 
@@ -55,4 +55,4 @@
 - contract / e2e / deployment 不再是占位目录
 - 发布前最小验证链路可以通过 Makefile 一次触发
 - 运行时、观测、部署配置和设计文档保持一致
-- 性能入口统一收口前，本模块仍保持活跃
+- 统一测试入口已就绪，本模块可从活跃列表移除
