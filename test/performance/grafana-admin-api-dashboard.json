@@ -1,0 +1,245 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "go_goroutines{job=\"admin-service\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "Admin Goroutines",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=\"admin-service\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "Admin RSS Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=\"admin-service\",route=~\"/api/admin/v1/.*\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Admin HTTP Throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{service=\"admin-service\",route=~\"/api/admin/v1/.*\"}[5m])) by (le, method, route))",
+          "legendFormat": "{{ method }} {{ route }}",
+          "refId": "A"
+        }
+      ],
+      "title": "Admin HTTP P95 By Route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=\"admin-service\",route=~\"/api/admin/v1/.*\",status_code=~\"4..|5..\"}[5m])) by (status_code, route)",
+          "legendFormat": "{{ status_code }} {{ route }}",
+          "refId": "A"
+        }
+      ],
+      "title": "Admin 4xx/5xx",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=\"admin-service\",method=\"POST\",route=\"/api/admin/v1/tenants\",status_code=\"201\"}[5m]))",
+          "legendFormat": "create tenant",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(http_requests_total{service=\"admin-service\",method=\"PATCH\",route=\"/api/admin/v1/tenants/{tenantId}\",status_code=\"200\"}[5m]))",
+          "legendFormat": "patch tenant",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(http_requests_total{service=\"admin-service\",method=\"PATCH\",route=\"/api/admin/v1/tenants/{tenantId}/policy\",status_code=\"200\"}[5m]))",
+          "legendFormat": "patch policy",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(http_requests_total{service=\"admin-service\",method=\"DELETE\",route=\"/api/admin/v1/files/{fileId}\",status_code=\"200\"}[5m]))",
+          "legendFormat": "delete file",
+          "refId": "D"
+        }
+      ],
+      "title": "Admin Write Throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=\"admin-service\",method=\"GET\",route=\"/api/admin/v1/tenants\",status_code=\"200\"}[5m]))",
+          "legendFormat": "list tenants",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(http_requests_total{service=\"admin-service\",method=\"GET\",route=\"/api/admin/v1/files\",status_code=\"200\"}[5m]))",
+          "legendFormat": "list files",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(http_requests_total{service=\"admin-service\",method=\"GET\",route=\"/api/admin/v1/audit-logs\",status_code=\"200\"}[5m]))",
+          "legendFormat": "list audit logs",
+          "refId": "C"
+        }
+      ],
+      "title": "Admin Read Throughput",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "admin-service",
+    "performance"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timezone": "",
+  "title": "Admin Service Full API",
+  "uid": "admin-service-full-api",
+  "version": 1
+}
