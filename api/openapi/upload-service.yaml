@@ -411,6 +411,8 @@ paths:
         - UPLOAD_SESSION_STATE_CONFLICT
         - UPLOAD_COMPLETE_IN_PROGRESS
         - UPLOAD_PARTS_MISSING
+        - UPLOAD_MULTIPART_NOT_FOUND
+        - UPLOAD_MULTIPART_CONFLICT
         - UPLOAD_HASH_MISMATCH
         - UPLOAD_HASH_UNSUPPORTED
         - TENANT_QUOTA_EXCEEDED
@@ -729,6 +731,34 @@ components:
                   details:
                     resourceType: uploadSession
                     resourceId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+            multipartNotFound:
+              summary: provider 侧 multipart 上下文已丢失
+              value:
+                requestId: 01JPA86RGWZVEP4K2B00CCMZHY
+                error:
+                  code: UPLOAD_MULTIPART_NOT_FOUND
+                  message: multipart upload state is missing in storage provider
+                  details:
+                    resourceType: uploadSession
+                    resourceId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+                    uploadSessionId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+                    providerUploadId: upload-123
+                    operation: list uploaded parts
+                    providerErrorType: multipartNotFound
+            multipartConflict:
+              summary: provider 侧 multipart 状态冲突
+              value:
+                requestId: 01JPA86RGWZVEP4K2B00CCMZHY
+                error:
+                  code: UPLOAD_MULTIPART_CONFLICT
+                  message: multipart upload state conflicts with storage provider
+                  details:
+                    resourceType: uploadSession
+                    resourceId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+                    uploadSessionId: 01JPA7Y0Q4D6CMEPH5Y7R6Q2D4
+                    providerUploadId: upload-123
+                    operation: complete multipart upload
+                    providerErrorType: multipartConflict
             quotaExceeded:
               summary: 租户配额超限
               value:
@@ -823,7 +853,7 @@ components:
         totalParts:
           type: integer
           minimum: 1
-          description: DIRECT 模式的预期总分片数。
+          description: DIRECT 模式的预期总分片数。若底层对象存储兼容 S3 multipart，除最后一个 part 外，其余 part 需满足 provider 的最小分片大小约束，通常为 `5 MiB`。
           example: 8
         metadata:
           type: object

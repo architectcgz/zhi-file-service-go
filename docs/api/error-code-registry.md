@@ -99,6 +99,8 @@
 | `UPLOAD_HASH_UNSUPPORTED` | `400` | 哈希算法不支持 |
 | `UPLOAD_HASH_MISMATCH` | `409` | 声明哈希与验证结果不一致 |
 | `UPLOAD_PARTS_MISSING` | `409` | complete 时缺少分片 |
+| `UPLOAD_MULTIPART_NOT_FOUND` | `409` | provider 侧 multipart 上传上下文已丢失，当前 session 需重新发起 |
+| `UPLOAD_MULTIPART_CONFLICT` | `409` | provider 侧 multipart 状态与 complete 请求冲突，例如 part 顺序、etag 或最小分片大小不满足 |
 | `TENANT_QUOTA_EXCEEDED` | `409` | 超出 tenant 配额 |
 | `MIME_TYPE_NOT_ALLOWED` | `400` | MIME 类型不允许 |
 
@@ -134,6 +136,10 @@
 - `reason`
 - `resourceType`
 - `resourceId`
+- `uploadSessionId`
+- `providerUploadId`
+- `operation`
+- `providerErrorType`
 - `currentStatus`
 - `allowedStatuses`
 - `retryAfterSeconds`

@@ -668,6 +668,173 @@ func TestCompleteUploadSessionMarksFailedAndEnqueuesFailureEventOnHashMismatch(t
 	}
 }
 
+func TestCompleteUploadSessionMarksFailedOnMultipartConflict(t *testing.T) {
+	now := time.Date(2026, 3, 22, 18, 56, 0, 0, time.UTC)
+	startedAt := now.Add(-time.Minute)
+	session := mustNewSession(t, domain.CreateSessionParams{
+		ID:                  "upload-multipart-conflict-1",
+		TenantID:            "tenant-a",
+		OwnerID:             "user-1",
+		FileName:            "video.mp4",
+		ContentType:         "video/mp4",
+		SizeBytes:           10_485_760,
+		AccessLevel:         storage.AccessLevelPrivate,
+		Mode:                domain.SessionModeDirect,
+		Status:              domain.SessionStatusCompleting,
+		TotalParts:          2,
+		Object:              storage.ObjectRef{Provider: storage.ProviderS3, BucketName: "private-bucket", ObjectKey: "tenant-a/uploads/upload-multipart-conflict-1/video.mp4"},
+		ProviderUploadID:    "provider-upload-conflict-1",
+		Hash:                &domain.ContentHash{Algorithm: "SHA256", Value: validHash()},
+		CompletionToken:     "complete-multipart-conflict-1",
+		CompletionStartedAt: &startedAt,
+		CreatedAt:           now.Add(-2 * time.Minute),
+		UpdatedAt:           startedAt,
+		ExpiresAt:           now.Add(28 * time.Minute),
+	})
+	sessions := &stubCompleteSessionRepository{
+		session: session,
+		acquired: &ports.CompletionAcquireResult{
+			Session:   session,
+			Ownership: domain.CompletionOwnershipHeldByCaller,
+		},
+		confirmed: session,
+	}
+	outbox := &stubUploadOutboxPublisher{}
+	handler := commands.NewCompleteUploadSessionHandler(
+		sessions,
+		&stubSessionPartRepository{},
+		&stubBlobRepository{},
+		&stubFileRepository{},
+		&stubCompleteDedupRepository{},
+		&stubTenantUsageRepository{},
+		outbox,
+		&stubUploadTxManager{},
+		&stubCompleteMultipartManager{
+			parts: []storage.UploadedPart{
+				{PartNumber: 1, ETag: `"etag-1"`, SizeBytes: 5_242_880},
+				{PartNumber: 2, ETag: `"etag-2"`, SizeBytes: 5_242_880},
+			},
+			completeErr: errors.Join(storage.ErrMultipartConflict, errors.New("EntityTooSmall")),
+		},
+		&stubObjectReader{},
+		&stubSequenceIDGenerator{},
+		clock.NewFixed(now),
+	)
+
+	_, err := handler.Handle(context.Background(), commands.CompleteUploadSessionCommand{
+		UploadSessionID: session.ID,
+		IdempotencyKey:  "complete-multipart-conflict-1",
+		RequestID:       "req-multipart-conflict-1",
+		UploadedParts: []storage.UploadedPart{
+			{PartNumber: 1, ETag: `"etag-1"`, SizeBytes: 5_242_880},
+			{PartNumber: 2, ETag: `"etag-2"`, SizeBytes: 5_242_880},
+		},
+		Auth: newUploadAuth(),
+	})
+	if code := xerrors.CodeOf(err); code != xerrors.Code("UPLOAD_MULTIPART_CONFLICT") {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, xerrors.Code("UPLOAD_MULTIPART_CONFLICT"), err)
+	}
+	if status := xerrors.StatusOf(err); status != 409 {
+		t.Fatalf("StatusOf() = %d, want 409", status)
+	}
+	if sessions.saved == nil || sessions.saved.Status != domain.SessionStatusFailed {
+		t.Fatalf("expected failed session to be saved, got %#v", sessions.saved)
+	}
+	if sessions.saved.FailureCode != "UPLOAD_MULTIPART_CONFLICT" {
+		t.Fatalf("failure code = %q, want %q", sessions.saved.FailureCode, "UPLOAD_MULTIPART_CONFLICT")
+	}
+	if outbox.message == nil {
+		t.Fatal("expected failed outbox message")
+	}
+	if outbox.message.EventType != "upload.session.failed.v1" {
+		t.Fatalf("event type = %q, want %q", outbox.message.EventType, "upload.session.failed.v1")
+	}
+	payload := decodeOutboxPayload(t, outbox.message.Payload)
+	if payload["failureCode"] != "UPLOAD_MULTIPART_CONFLICT" {
+		t.Fatalf("unexpected outbox payload: %#v", payload)
+	}
+}
+
+func TestCompleteUploadSessionMarksFailedOnMultipartUploadNotFound(t *testing.T) {
+	now := time.Date(2026, 3, 22, 18, 56, 30, 0, time.UTC)
+	startedAt := now.Add(-time.Minute)
+	session := mustNewSession(t, domain.CreateSessionParams{
+		ID:                  "upload-multipart-missing-1",
+		TenantID:            "tenant-a",
+		OwnerID:             "user-1",
+		FileName:            "video.mp4",
+		ContentType:         "video/mp4",
+		SizeBytes:           10_485_760,
+		AccessLevel:         storage.AccessLevelPrivate,
+		Mode:                domain.SessionModeDirect,
+		Status:              domain.SessionStatusCompleting,
+		TotalParts:          2,
+		Object:              storage.ObjectRef{Provider: storage.ProviderS3, BucketName: "private-bucket", ObjectKey: "tenant-a/uploads/upload-multipart-missing-1/video.mp4"},
+		ProviderUploadID:    "provider-upload-missing-1",
+		Hash:                &domain.ContentHash{Algorithm: "SHA256", Value: validHash()},
+		CompletionToken:     "complete-multipart-missing-1",
+		CompletionStartedAt: &startedAt,
+		CreatedAt:           now.Add(-2 * time.Minute),
+		UpdatedAt:           startedAt,
+		ExpiresAt:           now.Add(28 * time.Minute),
+	})
+	sessions := &stubCompleteSessionRepository{
+		session: session,
+		acquired: &ports.CompletionAcquireResult{
+			Session:   session,
+			Ownership: domain.CompletionOwnershipHeldByCaller,
+		},
+		confirmed: session,
+	}
+	outbox := &stubUploadOutboxPublisher{}
+	handler := commands.NewCompleteUploadSessionHandler(
+		sessions,
+		&stubSessionPartRepository{},
+		&stubBlobRepository{},
+		&stubFileRepository{},
+		&stubCompleteDedupRepository{},
+		&stubTenantUsageRepository{},
+		outbox,
+		&stubUploadTxManager{},
+		&stubCompleteMultipartManager{
+			listErr: errors.Join(storage.ErrMultipartNotFound, errors.New("NoSuchUpload")),
+		},
+		&stubObjectReader{},
+		&stubSequenceIDGenerator{},
+		clock.NewFixed(now),
+	)
+
+	_, err := handler.Handle(context.Background(), commands.CompleteUploadSessionCommand{
+		UploadSessionID: session.ID,
+		IdempotencyKey:  "complete-multipart-missing-1",
+		RequestID:       "req-multipart-missing-1",
+		UploadedParts: []storage.UploadedPart{
+			{PartNumber: 1, ETag: `"etag-1"`, SizeBytes: 5_242_880},
+			{PartNumber: 2, ETag: `"etag-2"`, SizeBytes: 5_242_880},
+		},
+		Auth: newUploadAuth(),
+	})
+	if code := xerrors.CodeOf(err); code != xerrors.Code("UPLOAD_MULTIPART_NOT_FOUND") {
+		t.Fatalf("CodeOf() = %q, want %q (err=%v)", code, xerrors.Code("UPLOAD_MULTIPART_NOT_FOUND"), err)
+	}
+	if status := xerrors.StatusOf(err); status != 409 {
+		t.Fatalf("StatusOf() = %d, want 409", status)
+	}
+	if sessions.saved == nil || sessions.saved.Status != domain.SessionStatusFailed {
+		t.Fatalf("expected failed session to be saved, got %#v", sessions.saved)
+	}
+	if sessions.saved.FailureCode != "UPLOAD_MULTIPART_NOT_FOUND" {
+		t.Fatalf("failure code = %q, want %q", sessions.saved.FailureCode, "UPLOAD_MULTIPART_NOT_FOUND")
+	}
+	if outbox.message == nil {
+		t.Fatal("expected failed outbox message")
+	}
+	payload := decodeOutboxPayload(t, outbox.message.Payload)
+	if payload["failureCode"] != "UPLOAD_MULTIPART_NOT_FOUND" {
+		t.Fatalf("unexpected outbox payload: %#v", payload)
+	}
+}
+
 func TestCompleteUploadSessionRetriesWhenCallerStillOwnsCompletion(t *testing.T) {
 	now := time.Date(2026, 3, 22, 18, 57, 0, 0, time.UTC)
 	startedAt := now.Add(-time.Minute)
@@ -1062,7 +1229,9 @@ func (s *stubObjectReader) ComputeSHA256(context.Context, storage.ObjectRef) (st
 
 type stubCompleteMultipartManager struct {
 	parts         []storage.UploadedPart
+	listErr       error
 	listCalls     int
+	completeErr   error
 	completeCalls int
 	abortCalls    int
 	abortErr      error
@@ -1078,12 +1247,15 @@ func (s *stubCompleteMultipartManager) UploadPart(context.Context, storage.Objec
 
 func (s *stubCompleteMultipartManager) ListUploadedParts(context.Context, storage.ObjectRef, string) ([]storage.UploadedPart, error) {
 	s.listCalls++
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	return append([]storage.UploadedPart(nil), s.parts...), nil
 }
 
 func (s *stubCompleteMultipartManager) CompleteMultipartUpload(context.Context, storage.ObjectRef, string, []storage.UploadedPart) error {
 	s.completeCalls++
-	return nil
+	return s.completeErr
 }
 
 func (s *stubCompleteMultipartManager) AbortMultipartUpload(context.Context, storage.ObjectRef, string) error {

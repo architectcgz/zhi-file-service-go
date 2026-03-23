@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/architectcgz/zhi-file-service-go/internal/platform/config"
 	platformstorage "github.com/architectcgz/zhi-file-service-go/internal/platform/storage"
 	pkgstorage "github.com/architectcgz/zhi-file-service-go/pkg/storage"
+	"github.com/aws/smithy-go"
 )
 
 func TestResolveUsesConfiguredBuckets(t *testing.T) {
@@ -168,6 +170,36 @@ func TestPutObjectBuffersNonSeekableReader(t *testing.T) {
 	}, "text/plain", onlyReader{r: bytes.NewBuffer(payload)}, int64(len(payload)))
 	if err != nil {
 		t.Fatalf("PutObject() error = %v", err)
+	}
+}
+
+func TestMapStorageErrorMapsEntityTooSmallToMultipartConflict(t *testing.T) {
+	err := mapStorageError(&smithy.GenericAPIError{
+		Code:    "EntityTooSmall",
+		Message: "Your proposed upload is smaller than the minimum allowed object size.",
+	})
+	if !errors.Is(err, pkgstorage.ErrMultipartConflict) {
+		t.Fatalf("errors.Is(err, ErrMultipartConflict) = false, err=%v", err)
+	}
+}
+
+func TestMapStorageErrorMapsNoSuchUploadToMultipartNotFound(t *testing.T) {
+	err := mapStorageError(&smithy.GenericAPIError{
+		Code:    "NoSuchUpload",
+		Message: "The specified multipart upload does not exist.",
+	})
+	if !errors.Is(err, pkgstorage.ErrMultipartNotFound) {
+		t.Fatalf("errors.Is(err, ErrMultipartNotFound) = false, err=%v", err)
+	}
+}
+
+func TestMapStorageErrorMapsUnknownProviderErrorToProviderUnavailable(t *testing.T) {
+	err := mapStorageError(&smithy.GenericAPIError{
+		Code:    "SlowDown",
+		Message: "Please reduce your request rate.",
+	})
+	if !errors.Is(err, pkgstorage.ErrProviderUnavailable) {
+		t.Fatalf("errors.Is(err, ErrProviderUnavailable) = false, err=%v", err)
 	}
 }
 

@@ -237,10 +237,11 @@ internal/services/upload/
 
 1. 对 `DIRECT` 先调用 provider `ListUploadedParts` 读取 authoritative part 列表，并与本地观察值对齐或补记
 2. 对 `DIRECT` 基于 authoritative part 列表调用 provider complete multipart
-3. 调 `HeadObject` 获取最终对象 metadata
-4. 若请求回传 `contentHash`，校验算法当前仅支持 `SHA256`，并与 create 阶段声明值一致
-5. 计算或确认 checksum / size / content type
-6. 执行 dedup 判定
+3. 若底层 provider 兼容 S3 multipart，complete 前必须保证除最后一个外的各 part 满足 provider 最小 part size 约束，通常为 `5 MiB`
+4. 调 `HeadObject` 获取最终对象 metadata
+5. 若请求回传 `contentHash`，校验算法当前仅支持 `SHA256`，并与 create 阶段声明值一致
+6. 计算或确认 checksum / size / content type
+7. 执行 dedup 判定
 
 目的：
 
@@ -262,7 +263,8 @@ internal/services/upload/
 
 失败处理：
 
-- 如果阶段 B 失败，session 进入 `FAILED` 或保留 `COMPLETING` 并由 `job-service` 修复
+- 如果阶段 B 因 `UPLOAD_HASH_MISMATCH`、`UPLOAD_HASH_INVALID`、`UPLOAD_HASH_UNSUPPORTED`、`UPLOAD_MULTIPART_NOT_FOUND`、`UPLOAD_MULTIPART_CONFLICT` 失败，必须立即将 session 标记为 `FAILED` 并写出 `upload.session.failed.v1`
+- 如果阶段 B 因 provider 暂时不可用而返回 `SERVICE_UNAVAILABLE`，session 保留 `COMPLETING` 并由 `job-service` 修复
 - 如果阶段 C 失败，但对象已完成，必须记录修复标记，交给后台补偿
 
 禁止做法：
@@ -357,6 +359,9 @@ SQL 约束：
 - `upload_session_id`
 - `tenant_id`
 - `file_id`
+- `provider_upload_id`
+- `provider_error_type`
+- `operation`
 - `upload_mode`
 - `session_status`
 - `completion_token`

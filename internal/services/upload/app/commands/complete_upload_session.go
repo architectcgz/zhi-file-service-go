@@ -231,7 +231,7 @@ func (h CompleteUploadSessionHandler) materialize(ctx context.Context, session *
 
 		providerParts, err = h.multipart.ListUploadedParts(ctx, session.Object, session.ProviderUploadID)
 		if err != nil {
-			return materializedUpload{}, xerrors.Wrap(xerrors.CodeServiceUnavailable, "list uploaded parts", err, nil)
+			return materializedUpload{}, wrapMultipartOperationError(session, "list uploaded parts", err)
 		}
 		providerParts, err = normalizeUploadedParts(providerParts)
 		if err != nil {
@@ -249,7 +249,7 @@ func (h CompleteUploadSessionHandler) materialize(ctx context.Context, session *
 			}
 		}
 		if err := h.multipart.CompleteMultipartUpload(ctx, session.Object, session.ProviderUploadID, providerParts); err != nil {
-			return materializedUpload{}, xerrors.Wrap(xerrors.CodeServiceUnavailable, "complete multipart upload", err, nil)
+			return materializedUpload{}, wrapMultipartOperationError(session, "complete multipart upload", err)
 		}
 	}
 
@@ -662,9 +662,37 @@ func hashString(hash *domain.ContentHash) string {
 	return hash.Value
 }
 
+func wrapMultipartOperationError(session *domain.Session, operation string, err error) error {
+	details := xerrors.Details{
+		"resourceType":    "uploadSession",
+		"resourceId":      session.ID,
+		"uploadSessionId": session.ID,
+		"providerUploadId": strings.TrimSpace(
+			session.ProviderUploadID,
+		),
+		"operation": strings.TrimSpace(operation),
+	}
+
+	switch {
+	case errors.Is(err, pkgstorage.ErrMultipartNotFound):
+		details["providerErrorType"] = "multipartNotFound"
+		return xerrors.Wrap(domain.CodeUploadMultipartNotFound, "multipart upload state is missing in storage provider", err, details)
+	case errors.Is(err, pkgstorage.ErrMultipartConflict):
+		details["providerErrorType"] = "multipartConflict"
+		return xerrors.Wrap(domain.CodeUploadMultipartConflict, "multipart upload state conflicts with storage provider", err, details)
+	default:
+		details["providerErrorType"] = "providerUnavailable"
+		return xerrors.Wrap(xerrors.CodeServiceUnavailable, operation, err, details)
+	}
+}
+
 func isTerminalCompleteFailure(err error) bool {
 	switch xerrors.CodeOf(err) {
-	case domain.CodeUploadHashMismatch, domain.CodeUploadHashUnsupported, domain.CodeUploadHashInvalid:
+	case domain.CodeUploadHashMismatch,
+		domain.CodeUploadHashUnsupported,
+		domain.CodeUploadHashInvalid,
+		domain.CodeUploadMultipartNotFound,
+		domain.CodeUploadMultipartConflict:
 		return true
 	default:
 		return false

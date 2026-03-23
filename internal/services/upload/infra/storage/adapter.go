@@ -411,7 +411,7 @@ func mapStorageError(err error) error {
 			return fmt.Errorf("%w: %v", pkgstorage.ErrObjectNotFound, err)
 		case "NoSuchUpload":
 			return fmt.Errorf("%w: %v", pkgstorage.ErrMultipartNotFound, err)
-		case "InvalidPart", "InvalidPartOrder", "BadDigest":
+		case "InvalidPart", "InvalidPartOrder", "BadDigest", "EntityTooSmall":
 			return fmt.Errorf("%w: %v", pkgstorage.ErrMultipartConflict, err)
 		}
 	}

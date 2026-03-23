@@ -13,6 +13,8 @@ const (
 	CodeUploadSessionStateConflict       xerrors.Code = "UPLOAD_SESSION_STATE_CONFLICT"
 	CodeUploadCompleteInProgress         xerrors.Code = "UPLOAD_COMPLETE_IN_PROGRESS"
 	CodeUploadPartsMissing               xerrors.Code = "UPLOAD_PARTS_MISSING"
+	CodeUploadMultipartNotFound          xerrors.Code = "UPLOAD_MULTIPART_NOT_FOUND"
+	CodeUploadMultipartConflict          xerrors.Code = "UPLOAD_MULTIPART_CONFLICT"
 	CodeTenantQuotaExceeded              xerrors.Code = "TENANT_QUOTA_EXCEEDED"
 	CodeMimeTypeNotAllowed               xerrors.Code = "MIME_TYPE_NOT_ALLOWED"
 )
