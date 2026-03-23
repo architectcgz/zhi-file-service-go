@@ -28,6 +28,7 @@ type ResolveDownloadHandler struct {
 	presign          ports.PresignManager
 	privateTTL       time.Duration
 	publicURLEnabled bool
+	metrics          StoragePresignMetrics
 }
 
 func NewResolveDownloadHandler(
@@ -45,7 +46,16 @@ func NewResolveDownloadHandler(
 		presign:          presign,
 		privateTTL:       privateTTL,
 		publicURLEnabled: publicURLEnabled,
+		metrics:          noopStoragePresignMetrics{},
 	}
+}
+
+func (h ResolveDownloadHandler) WithMetrics(metrics StoragePresignMetrics) ResolveDownloadHandler {
+	if metrics == nil {
+		metrics = noopStoragePresignMetrics{}
+	}
+	h.metrics = metrics
+	return h
 }
 
 func (h ResolveDownloadHandler) Handle(ctx context.Context, query ResolveDownloadQuery) (ResolveDownloadResult, error) {
@@ -82,7 +92,9 @@ func (h ResolveDownloadHandler) Handle(ctx context.Context, query ResolveDownloa
 		return result, nil
 	}
 
+	startedAt := time.Now()
 	url, err := h.presign.PresignGetObject(ctx, file.ObjectRef(), h.privateTTL)
+	h.metrics.RecordStoragePresignDuration(time.Since(startedAt))
 	if err != nil {
 		return ResolveDownloadResult{}, xerrors.Wrap(xerrors.CodeServiceUnavailable, "presign private object", err, nil)
 	}

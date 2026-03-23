@@ -85,6 +85,63 @@ func TestRedirectByAccessTicketRejectsExpiredTicket(t *testing.T) {
 	}
 }
 
+func TestRedirectByAccessTicketRecordsPresignDurationForPrivateOnly(t *testing.T) {
+	now := time.Date(2026, 3, 22, 9, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name         string
+		file         domain.FileView
+		wantCalls    int
+		wantMeasures int
+	}{
+		{
+			name:         "private file records presign duration",
+			file:         newDownloadTestFile(storage.AccessLevelPrivate),
+			wantCalls:    1,
+			wantMeasures: 1,
+		},
+		{
+			name:         "public file skips presign duration",
+			file:         newDownloadTestFile(storage.AccessLevelPublic),
+			wantCalls:    0,
+			wantMeasures: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &stubFileReadRepository{file: tt.file}
+			policies := &stubTenantPolicyReader{policy: domain.TenantPolicy{TenantID: "tenant-a"}}
+			issuer := &stubRedirectTicketIssuer{
+				claims: domain.AccessTicketClaims{
+					FileID:      tt.file.FileID,
+					TenantID:    "tenant-a",
+					Subject:     "user-1",
+					SubjectType: "USER",
+					Disposition: domain.DownloadDispositionAttachment,
+					ExpiresAt:   now.Add(2 * time.Minute),
+				},
+			}
+			presign := &stubPresignManager{url: "https://s3.example.com/private/object?signature=1"}
+			metrics := &stubPresignMetrics{}
+			handler := queries.NewRedirectByAccessTicketHandler(repo, policies, issuer, &stubObjectLocator{url: "https://cdn.example.com/public/object"}, presign, clock.NewFixed(now), 2*time.Minute, true).
+				WithMetrics(metrics)
+
+			if _, err := handler.Handle(context.Background(), queries.RedirectByAccessTicketQuery{
+				Ticket: "at_ticket_1",
+			}); err != nil {
+				t.Fatalf("Handle returned error: %v", err)
+			}
+			if presign.calls != tt.wantCalls {
+				t.Fatalf("presign calls = %d, want %d", presign.calls, tt.wantCalls)
+			}
+			if metrics.count != tt.wantMeasures {
+				t.Fatalf("presign metrics count = %d, want %d", metrics.count, tt.wantMeasures)
+			}
+		})
+	}
+}
+
 type stubRedirectTicketIssuer struct {
 	claims      domain.AccessTicketClaims
 	verifyErr   error

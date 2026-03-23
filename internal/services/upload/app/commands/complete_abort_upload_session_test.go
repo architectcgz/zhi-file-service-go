@@ -178,6 +178,105 @@ func TestCompleteUploadSessionPresignedSingleUsesVerifiedHash(t *testing.T) {
 	}
 }
 
+func TestCompleteUploadSessionRecordsDedupMetrics(t *testing.T) {
+	now := time.Date(2026, 3, 22, 18, 12, 0, 0, time.UTC)
+
+	tests := []struct {
+		name         string
+		decision     *domain.DedupDecision
+		wantHit      int
+		wantMiss     int
+		generatorIDs []string
+	}{
+		{
+			name: "dedup hit",
+			decision: &domain.DedupDecision{
+				Hit:    true,
+				BlobID: "blob-hit-1",
+				FileID: "file-existing-1",
+			},
+			wantHit:      1,
+			wantMiss:     0,
+			generatorIDs: []string{"file-hit-1"},
+		},
+		{
+			name:         "dedup miss",
+			decision:     nil,
+			wantHit:      0,
+			wantMiss:     1,
+			generatorIDs: []string{"blob-miss-1", "file-miss-1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := mustNewSession(t, domain.CreateSessionParams{
+				ID:          "upload-single-dedup-1",
+				TenantID:    "tenant-a",
+				OwnerID:     "user-1",
+				FileName:    "avatar.png",
+				ContentType: "image/png",
+				SizeBytes:   9,
+				AccessLevel: storage.AccessLevelPublic,
+				Mode:        domain.SessionModePresignedSingle,
+				Object: storage.ObjectRef{
+					Provider:   storage.ProviderS3,
+					BucketName: "public-bucket",
+					ObjectKey:  "tenant-a/uploads/upload-single-dedup-1/avatar.png",
+				},
+				Hash:      &domain.ContentHash{Algorithm: "SHA256", Value: validHash()},
+				CreatedAt: now.Add(-2 * time.Minute),
+				UpdatedAt: now.Add(-time.Minute),
+				ExpiresAt: now.Add(28 * time.Minute),
+			})
+
+			metrics := &stubCompleteUploadMetrics{}
+			handler := commands.NewCompleteUploadSessionHandler(
+				&stubCompleteSessionRepository{
+					session: session,
+					acquired: &ports.CompletionAcquireResult{
+						Session:   session,
+						Ownership: domain.CompletionOwnershipAcquired,
+					},
+					confirmed: session,
+				},
+				&stubSessionPartRepository{},
+				&stubBlobRepository{},
+				&stubFileRepository{},
+				&stubCompleteDedupRepository{decision: tt.decision},
+				&stubTenantUsageRepository{},
+				&stubUploadOutboxPublisher{},
+				&stubUploadTxManager{},
+				&stubCompleteMultipartManager{},
+				&stubObjectReader{
+					metadata: storage.ObjectMetadata{
+						SizeBytes:   9,
+						ContentType: "image/png",
+						ETag:        `"etag-single-dedup"`,
+						Checksum:    validHash(),
+					},
+				},
+				&stubSequenceIDGenerator{ids: tt.generatorIDs},
+				clock.NewFixed(now),
+			).WithMetrics(metrics)
+
+			if _, err := handler.Handle(context.Background(), commands.CompleteUploadSessionCommand{
+				UploadSessionID: session.ID,
+				IdempotencyKey:  "complete-dedup-1",
+				Auth:            newUploadAuth(),
+			}); err != nil {
+				t.Fatalf("Handle() error = %v", err)
+			}
+			if metrics.hitCount != tt.wantHit {
+				t.Fatalf("hit count = %d, want %d", metrics.hitCount, tt.wantHit)
+			}
+			if metrics.missCount != tt.wantMiss {
+				t.Fatalf("miss count = %d, want %d", metrics.missCount, tt.wantMiss)
+			}
+		})
+	}
+}
+
 func TestCompleteUploadSessionFallsBackToStreamingHashWhenChecksumMissing(t *testing.T) {
 	now := time.Date(2026, 3, 22, 18, 15, 0, 0, time.UTC)
 	session := mustNewSession(t, domain.CreateSessionParams{
@@ -896,6 +995,19 @@ func (s *stubCompleteDedupRepository) LookupByHash(_ context.Context, key ports.
 
 func (s *stubCompleteDedupRepository) ClaimHash(context.Context, ports.DedupClaim) error {
 	panic("unexpected call")
+}
+
+type stubCompleteUploadMetrics struct {
+	hitCount  int
+	missCount int
+}
+
+func (s *stubCompleteUploadMetrics) RecordDedupHit() {
+	s.hitCount++
+}
+
+func (s *stubCompleteUploadMetrics) RecordDedupMiss() {
+	s.missCount++
 }
 
 type stubTenantUsageRepository struct {

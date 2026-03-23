@@ -42,6 +42,7 @@ type CompleteUploadSessionHandler struct {
 	reader    ports.ObjectReader
 	idgen     ids.Generator
 	clock     clock.Clock
+	metrics   CompleteUploadMetrics
 }
 
 type materializedUpload struct {
@@ -115,7 +116,16 @@ func NewCompleteUploadSessionHandler(
 		reader:    reader,
 		idgen:     idgen,
 		clock:     clk,
+		metrics:   noopCompleteUploadMetrics{},
 	}
+}
+
+func (h CompleteUploadSessionHandler) WithMetrics(metrics CompleteUploadMetrics) CompleteUploadSessionHandler {
+	if metrics == nil {
+		metrics = noopCompleteUploadMetrics{}
+	}
+	h.metrics = metrics
+	return h
 }
 
 func (h CompleteUploadSessionHandler) Handle(ctx context.Context, command CompleteUploadSessionCommand) (view.CompletedUploadSession, error) {
@@ -276,6 +286,11 @@ func (h CompleteUploadSessionHandler) materialize(ctx context.Context, session *
 			if err := dedupDecision.Validate(); err != nil {
 				return materializedUpload{}, err
 			}
+		}
+		if dedupDecision != nil && dedupDecision.Hit {
+			h.metrics.RecordDedupHit()
+		} else {
+			h.metrics.RecordDedupMiss()
 		}
 	}
 

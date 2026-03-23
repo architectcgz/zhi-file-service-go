@@ -59,6 +59,7 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 		app.Config.Access.TicketTTL,
 		"/api/v1/access-tickets",
 	)
+	metricsRecorder := httptransport.NewMetricsRecorder(app.Metrics.Registry(), app.Config.App.ServiceName)
 	resolveDownload := queries.NewResolveDownloadHandler(
 		fileRepo,
 		policies,
@@ -66,7 +67,7 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 		storageAdapter,
 		app.Config.Access.PrivatePresignTTL,
 		app.Config.Access.PublicURLEnabled,
-	)
+	).WithMetrics(metricsRecorder)
 	redirectByTicket := queries.NewRedirectByAccessTicketHandler(
 		fileRepo,
 		policies,
@@ -76,8 +77,7 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 		clk,
 		app.Config.Access.PrivatePresignTTL,
 		app.Config.Access.PublicURLEnabled,
-	)
-	metricsRecorder := httptransport.NewMetricsRecorder(app.Metrics.Registry(), app.Config.App.ServiceName)
+	).WithMetrics(metricsRecorder)
 
 	handler := httptransport.NewHandler(httptransport.Options{
 		Auth:                   authResolver,

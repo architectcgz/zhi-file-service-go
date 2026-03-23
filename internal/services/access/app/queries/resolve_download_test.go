@@ -92,6 +92,60 @@ func TestResolveDownloadRejectsInlinePreviewWhenPolicyDisallowsIt(t *testing.T) 
 	}
 }
 
+func TestResolveDownloadRecordsPresignDurationForPrivateOnly(t *testing.T) {
+	tests := []struct {
+		name                string
+		file                domain.FileView
+		publicURLEnabled    bool
+		wantPresignCalls    int
+		wantPresignMeasures int
+	}{
+		{
+			name:                "private file records presign duration",
+			file:                newDownloadTestFile(storage.AccessLevelPrivate),
+			publicURLEnabled:    true,
+			wantPresignCalls:    1,
+			wantPresignMeasures: 1,
+		},
+		{
+			name:                "public file skips presign duration",
+			file:                newDownloadTestFile(storage.AccessLevelPublic),
+			publicURLEnabled:    true,
+			wantPresignCalls:    0,
+			wantPresignMeasures: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &stubFileReadRepository{file: tt.file}
+			policies := &stubTenantPolicyReader{policy: domain.TenantPolicy{TenantID: tt.file.TenantID}}
+			locator := &stubObjectLocator{url: "https://cdn.example.com/public/object"}
+			presign := &stubPresignManager{url: "https://s3.example.com/private/object?signature=1"}
+			metrics := &stubPresignMetrics{}
+			handler := queries.NewResolveDownloadHandler(repo, policies, locator, presign, 2*time.Minute, tt.publicURLEnabled).
+				WithMetrics(metrics)
+
+			if _, err := handler.Handle(context.Background(), queries.ResolveDownloadQuery{
+				FileID: tt.file.FileID,
+				Auth: domain.AuthContext{
+					SubjectID: "user-1",
+					TenantID:  tt.file.TenantID,
+					Scopes:    []string{domain.ScopeFileRead},
+				},
+			}); err != nil {
+				t.Fatalf("Handle returned error: %v", err)
+			}
+			if presign.calls != tt.wantPresignCalls {
+				t.Fatalf("presign calls = %d, want %d", presign.calls, tt.wantPresignCalls)
+			}
+			if metrics.count != tt.wantPresignMeasures {
+				t.Fatalf("presign metrics count = %d, want %d", metrics.count, tt.wantPresignMeasures)
+			}
+		})
+	}
+}
+
 func newDownloadTestFile(level storage.AccessLevel) domain.FileView {
 	return domain.FileView{
 		FileID:          "01JQ2QFJ1KRYT0X8S6Q9S7D9A1",
@@ -123,6 +177,16 @@ func (s *stubPresignManager) PresignUploadPart(context.Context, storage.ObjectRe
 func (s *stubPresignManager) PresignGetObject(_ context.Context, _ storage.ObjectRef, _ time.Duration) (string, error) {
 	s.calls++
 	return s.url, nil
+}
+
+type stubPresignMetrics struct {
+	count int
+	last  time.Duration
+}
+
+func (s *stubPresignMetrics) RecordStoragePresignDuration(duration time.Duration) {
+	s.count++
+	s.last = duration
 }
 
 type stubTenantPolicyReader struct {

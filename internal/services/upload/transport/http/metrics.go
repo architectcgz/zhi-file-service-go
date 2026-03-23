@@ -16,6 +16,8 @@ type MetricsRecorder interface {
 	RecordSessionComplete(time.Duration)
 	RecordSessionCompleteFailure(xerrors.Code)
 	RecordSessionAbort()
+	RecordDedupHit()
+	RecordDedupMiss()
 }
 
 type prometheusMetricsRecorder struct {
@@ -24,6 +26,8 @@ type prometheusMetricsRecorder struct {
 	sessionCompleteFail *prometheus.CounterVec
 	sessionAbort        prometheus.Counter
 	completeDuration    prometheus.Histogram
+	dedupHit            prometheus.Counter
+	dedupMiss           prometheus.Counter
 }
 
 type noopMetricsRecorder struct{}
@@ -68,6 +72,16 @@ func NewMetricsRecorder(registry *prometheus.Registry, serviceName string) Metri
 			ConstLabels: constLabels,
 			Buckets:     uploadCompleteDurationBuckets,
 		})),
+		dedupHit: registerCounter(registry, prometheus.NewCounter(prometheus.CounterOpts{
+			Name:        "upload_dedup_hit_total",
+			Help:        "Total number of dedup hits during upload completion.",
+			ConstLabels: constLabels,
+		})),
+		dedupMiss: registerCounter(registry, prometheus.NewCounter(prometheus.CounterOpts{
+			Name:        "upload_dedup_miss_total",
+			Help:        "Total number of dedup misses during upload completion.",
+			ConstLabels: constLabels,
+		})),
 	}
 }
 
@@ -100,10 +114,26 @@ func (r *prometheusMetricsRecorder) RecordSessionAbort() {
 	r.sessionAbort.Inc()
 }
 
+func (r *prometheusMetricsRecorder) RecordDedupHit() {
+	if r == nil {
+		return
+	}
+	r.dedupHit.Inc()
+}
+
+func (r *prometheusMetricsRecorder) RecordDedupMiss() {
+	if r == nil {
+		return
+	}
+	r.dedupMiss.Inc()
+}
+
 func (noopMetricsRecorder) RecordSessionCreate()                      {}
 func (noopMetricsRecorder) RecordSessionComplete(time.Duration)       {}
 func (noopMetricsRecorder) RecordSessionCompleteFailure(xerrors.Code) {}
 func (noopMetricsRecorder) RecordSessionAbort()                       {}
+func (noopMetricsRecorder) RecordDedupHit()                           {}
+func (noopMetricsRecorder) RecordDedupMiss()                          {}
 
 func registerCounter(registry *prometheus.Registry, collector prometheus.Counter) prometheus.Counter {
 	if err := registry.Register(collector); err != nil {

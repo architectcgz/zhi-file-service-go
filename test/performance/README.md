@@ -180,6 +180,7 @@ make test-performance
 
 - `http_requests_total`、`http_request_duration_seconds`、`http_response_size_bytes` 已在数据面服务运行时接通
 - `upload_session_create_total`、`upload_session_complete_total`、`upload_session_complete_failed_total`、`upload_session_abort_total`、`upload_complete_duration_seconds` 已接通
+- `upload_dedup_hit_total`、`upload_dedup_miss_total` 已接通
 - `file_get_total`、`access_ticket_issue_total`、`download_redirect_total`、`download_redirect_failed_total`、`access_ticket_verify_failed_total` 已接通
-- `upload_dedup_hit_total`、`upload_dedup_miss_total`、`access_storage_presign_duration_seconds` 仍属于后续细化模块，当前面板显示空值是预期行为
+- `access_storage_presign_duration_seconds` 已接通
 - dashboard 的价值是先把查询口径固定下来，避免后续压测时再反复改图

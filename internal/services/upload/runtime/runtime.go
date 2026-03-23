@@ -75,6 +75,7 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 		},
 	)
 	listUploadedParts := queries.NewListUploadedPartsHandler(sessions, parts, storageAdapter, clk)
+	metricsRecorder := httptransport.NewMetricsRecorder(app.Metrics.Registry(), app.Config.App.ServiceName)
 	completeUploadSession := commands.NewCompleteUploadSessionHandler(
 		sessions,
 		parts,
@@ -88,9 +89,8 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 		storageAdapter,
 		idgen,
 		clk,
-	)
+	).WithMetrics(metricsRecorder)
 	abortUploadSession := commands.NewAbortUploadSessionHandler(sessions, storageAdapter, clk)
-	metricsRecorder := httptransport.NewMetricsRecorder(app.Metrics.Registry(), app.Config.App.ServiceName)
 
 	handler := httptransport.NewHandler(httptransport.Options{
 		Auth:                  authResolver,

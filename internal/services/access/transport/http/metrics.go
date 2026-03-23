@@ -3,6 +3,7 @@ package httptransport
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/architectcgz/zhi-file-service-go/pkg/xerrors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -14,6 +15,7 @@ type MetricsRecorder interface {
 	RecordDownloadRedirect()
 	RecordDownloadRedirectFailure(xerrors.Code)
 	RecordAccessTicketVerifyFailure(xerrors.Code)
+	RecordStoragePresignDuration(time.Duration)
 }
 
 type prometheusMetricsRecorder struct {
@@ -22,6 +24,7 @@ type prometheusMetricsRecorder struct {
 	downloadRedirect    prometheus.Counter
 	downloadRedirectErr *prometheus.CounterVec
 	ticketVerifyErr     *prometheus.CounterVec
+	presignDuration     prometheus.Histogram
 }
 
 type noopMetricsRecorder struct{}
@@ -68,6 +71,12 @@ func NewMetricsRecorder(registry *prometheus.Registry, serviceName string) Metri
 			},
 			[]string{"error_code"},
 		)),
+		presignDuration: registerHistogram(registry, prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:        "access_storage_presign_duration_seconds",
+			Help:        "Duration of private object storage presign operations in seconds.",
+			ConstLabels: constLabels,
+			Buckets:     prometheus.DefBuckets,
+		})),
 	}
 }
 
@@ -106,11 +115,19 @@ func (r *prometheusMetricsRecorder) RecordAccessTicketVerifyFailure(code xerrors
 	r.ticketVerifyErr.WithLabelValues(metricErrorCode(code)).Inc()
 }
 
+func (r *prometheusMetricsRecorder) RecordStoragePresignDuration(duration time.Duration) {
+	if r == nil {
+		return
+	}
+	r.presignDuration.Observe(duration.Seconds())
+}
+
 func (noopMetricsRecorder) RecordFileGet()                               {}
 func (noopMetricsRecorder) RecordAccessTicketIssue()                     {}
 func (noopMetricsRecorder) RecordDownloadRedirect()                      {}
 func (noopMetricsRecorder) RecordDownloadRedirectFailure(xerrors.Code)   {}
 func (noopMetricsRecorder) RecordAccessTicketVerifyFailure(xerrors.Code) {}
+func (noopMetricsRecorder) RecordStoragePresignDuration(time.Duration)   {}
 
 func registerCounter(registry *prometheus.Registry, collector prometheus.Counter) prometheus.Counter {
 	if err := registry.Register(collector); err != nil {
@@ -130,6 +147,19 @@ func registerCounterVec(registry *prometheus.Registry, collector *prometheus.Cou
 		var alreadyRegistered prometheus.AlreadyRegisteredError
 		if errors.As(err, &alreadyRegistered) {
 			if existing, ok := alreadyRegistered.ExistingCollector.(*prometheus.CounterVec); ok {
+				return existing
+			}
+		}
+		panic(err)
+	}
+	return collector
+}
+
+func registerHistogram(registry *prometheus.Registry, collector prometheus.Histogram) prometheus.Histogram {
+	if err := registry.Register(collector); err != nil {
+		var alreadyRegistered prometheus.AlreadyRegisteredError
+		if errors.As(err, &alreadyRegistered) {
+			if existing, ok := alreadyRegistered.ExistingCollector.(prometheus.Histogram); ok {
 				return existing
 			}
 		}

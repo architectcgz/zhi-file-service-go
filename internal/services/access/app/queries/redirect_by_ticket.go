@@ -30,6 +30,7 @@ type RedirectByAccessTicketHandler struct {
 	clock            clock.Clock
 	privateTTL       time.Duration
 	publicURLEnabled bool
+	metrics          StoragePresignMetrics
 }
 
 func NewRedirectByAccessTicketHandler(
@@ -55,7 +56,16 @@ func NewRedirectByAccessTicketHandler(
 		clock:            clk,
 		privateTTL:       privateTTL,
 		publicURLEnabled: publicURLEnabled,
+		metrics:          noopStoragePresignMetrics{},
 	}
+}
+
+func (h RedirectByAccessTicketHandler) WithMetrics(metrics StoragePresignMetrics) RedirectByAccessTicketHandler {
+	if metrics == nil {
+		metrics = noopStoragePresignMetrics{}
+	}
+	h.metrics = metrics
+	return h
 }
 
 func (h RedirectByAccessTicketHandler) Handle(ctx context.Context, query RedirectByAccessTicketQuery) (RedirectByAccessTicketResult, error) {
@@ -108,7 +118,9 @@ func (h RedirectByAccessTicketHandler) Handle(ctx context.Context, query Redirec
 		return result, nil
 	}
 
+	startedAt := time.Now()
 	url, err := h.presign.PresignGetObject(ctx, file.ObjectRef(), h.privateTTL)
+	h.metrics.RecordStoragePresignDuration(time.Since(startedAt))
 	if err != nil {
 		return RedirectByAccessTicketResult{}, xerrors.Wrap(xerrors.CodeServiceUnavailable, "presign private object", err, nil)
 	}
