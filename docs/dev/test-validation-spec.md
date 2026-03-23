@@ -134,6 +134,7 @@
 - 对象存储 multipart / presign / finalize
 - outbox 发布与幂等消费
 - 单服务 runtime / wiring 闭环验证
+- Helm / Kustomize 基础部署清单的配置守护 smoke tests
 
 要求：
 
@@ -142,6 +143,7 @@
 - 每个测试运行必须自带数据准备与清理
 - 禁止依赖共享的人工维护测试环境
 - 不依赖真实基础设施、但需要真实 handler + runtime 接线的服务内集成验证，可紧贴代码放在 `internal/services/<service>/**/*_integration_test.go`
+- 部署契约守护测试可放在 `test/bootstrap`，直接解析基础清单并校验关键 env / secret 注入不漂移
 
 ## 3.3 契约测试
 
