@@ -7,7 +7,7 @@
         seed-dev seed-test bucket-init \
         run-upload run-access run-admin run-job \
         fmt lint openapi-validate doctor \
-        test-unit test-integration test-contract test-e2e \
+        test-unit test-integration test-contract test-e2e test-performance \
         build-upload build-access build-admin build-job build-all
 
 # ============================================================
@@ -42,6 +42,7 @@ help:
 	@echo "    test-integration    集成测试（需要真实 PG/Redis/MinIO）"
 	@echo "    test-contract       OpenAPI 契约测试"
 	@echo "    test-e2e            端到端测试"
+	@echo "    test-performance    性能测试（bench 或 k6）"
 	@echo ""
 	@echo "  工具检查"
 	@echo "    fmt                 格式化代码（gofmt + goimports）"
@@ -132,7 +133,11 @@ test-contract:
 
 test-e2e:
 	@echo ">>> 运行端到端测试..."
-	go test -count=1 -timeout=300s ./test/e2e/...
+	scripts/test/e2e.sh
+
+test-performance:
+	@echo ">>> 运行性能测试..."
+	scripts/test/performance.sh
 
 # ============================================================
 # 5. 工具检查

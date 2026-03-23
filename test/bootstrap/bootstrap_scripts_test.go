@@ -38,6 +38,16 @@ func runScript(t *testing.T, scriptPath string, args []string, env map[string]st
 	return string(out), err
 }
 
+func writeMockScript(t *testing.T, dir string, name string, body string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write mock script %s: %v", name, err)
+	}
+	return path
+}
+
 func TestMigrateBuildBuildsFlatView(t *testing.T) {
 	repoRoot := findRepoRoot(t)
 	scriptPath := filepath.Join(repoRoot, "scripts/bootstrap/migrate-build.sh")
@@ -152,5 +162,95 @@ func TestSeedScriptRejectsProd(t *testing.T) {
 	}
 	if !strings.Contains(out, "禁止") {
 		t.Fatalf("expected rejection message, output:\n%s", out)
+	}
+}
+
+func TestE2EScriptRunsGoTestOnE2EPackage(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	scriptPath := filepath.Join(repoRoot, "scripts/test/e2e.sh")
+
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "go.log")
+	mockGo := writeMockScript(t, tmpDir, "mock-go.sh", "#!/usr/bin/env bash\nset -euo pipefail\necho \"$*\" >> \"${LOG_FILE}\"\n")
+
+	out, err := runScript(t, scriptPath, nil, map[string]string{
+		"GO_BIN":   mockGo,
+		"LOG_FILE": logFile,
+	})
+	if err != nil {
+		t.Fatalf("e2e script failed: %v\noutput:\n%s", err, out)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read go log: %v", err)
+	}
+	got := strings.TrimSpace(string(data))
+	want := "test -count=1 -timeout=300s ./test/e2e/..."
+	if got != want {
+		t.Fatalf("go args = %q, want %q", got, want)
+	}
+}
+
+func TestPerformanceScriptRunsBenchmarksByDefault(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	scriptPath := filepath.Join(repoRoot, "scripts/test/performance.sh")
+
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "go.log")
+	mockGo := writeMockScript(t, tmpDir, "mock-go.sh", "#!/usr/bin/env bash\nset -euo pipefail\necho \"$*\" >> \"${LOG_FILE}\"\n")
+
+	out, err := runScript(t, scriptPath, nil, map[string]string{
+		"GO_BIN":   mockGo,
+		"LOG_FILE": logFile,
+	})
+	if err != nil {
+		t.Fatalf("performance script failed: %v\noutput:\n%s", err, out)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read go log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 benchmark commands, got %d, logs=%q", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "-bench Benchmark(CreateUploadSessionInline|CompleteUploadSessionPresignedSingle)") {
+		t.Fatalf("unexpected upload benchmark command: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "-bench Benchmark(GetFilePublic|ResolveDownloadPrivate|RedirectByAccessTicketPrivate)") {
+		t.Fatalf("unexpected access benchmark command: %q", lines[1])
+	}
+}
+
+func TestPerformanceScriptRunsK6ScenarioWhenRequested(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	scriptPath := filepath.Join(repoRoot, "scripts/test/performance.sh")
+
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "k6.log")
+	mockK6 := writeMockScript(t, tmpDir, "mock-k6.sh", "#!/usr/bin/env bash\nset -euo pipefail\necho \"$*\" >> \"${LOG_FILE}\"\n")
+
+	out, err := runScript(t, scriptPath, nil, map[string]string{
+		"K6_BIN":   mockK6,
+		"LOG_FILE": logFile,
+		"PERF_MODE": "k6",
+		"PERF_TARGET": "access",
+		"BASE_URL": "http://127.0.0.1:8081",
+		"BEARER_TOKEN": "dev-token",
+		"FILE_ID": "file-1",
+	})
+	if err != nil {
+		t.Fatalf("performance script failed: %v\noutput:\n%s", err, out)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read k6 log: %v", err)
+	}
+	got := strings.TrimSpace(string(data))
+	if !strings.Contains(got, "run") || !strings.Contains(got, "test/performance/access-read-hotpath.js") {
+		t.Fatalf("unexpected k6 command: %q", got)
 	}
 }
