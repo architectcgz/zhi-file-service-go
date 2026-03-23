@@ -108,6 +108,8 @@
 - `STORAGE_ACCESS_KEY`
 - `STORAGE_SECRET_KEY`
 - `ACCESS_TICKET_SIGNING_KEY`
+- `UPLOAD_AUTH_JWKS`
+- `ACCESS_AUTH_JWKS`
 - `ADMIN_AUTH_JWKS` 或等价认证密钥配置
 
 禁止把这些值写入：
@@ -115,6 +117,12 @@
 - Helm values 明文
 - Git 仓库
 - 普通 ConfigMap
+
+对数据面鉴权额外要求：
+
+- `UPLOAD_AUTH_JWKS` / `ACCESS_AUTH_JWKS` 必须通过 Secret 注入
+- 基础 Helm values 与 Kustomize base 不得显式写死 `*_AUTH_JWKS`
+- 基础 Helm values 与 Kustomize base 不得用空字符串覆盖 `*_AUTH_ALLOWED_ISSUERS`
 
 ## 4. 启动顺序
 
