@@ -1,6 +1,7 @@
 package bootstrap_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -252,6 +253,77 @@ func TestPerformanceScriptRunsK6ScenarioWhenRequested(t *testing.T) {
 	got := strings.TrimSpace(string(data))
 	if !strings.Contains(got, "run") || !strings.Contains(got, "test/performance/access-read-hotpath.js") {
 		t.Fatalf("unexpected k6 command: %q", got)
+	}
+}
+
+func TestPerformanceScriptRunsFullAPIWarmupBeforeMeasuredRun(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	scriptPath := filepath.Join(repoRoot, "scripts/test/performance.sh")
+
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "k6.log")
+	mockK6 := writeMockScript(t, tmpDir, "mock-k6.sh", "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s|%s|%s|%s|%s\\n' \"${UPLOAD_INLINE_DURATION:-}\" \"${UPLOAD_PRESIGNED_SINGLE_DURATION:-}\" \"${UPLOAD_DIRECT_DURATION:-}\" \"${UPLOAD_ABORT_DURATION:-}\" \"$*\" >> \"${LOG_FILE}\"\n")
+
+	out, err := runScript(t, scriptPath, nil, map[string]string{
+		"K6_BIN":                         mockK6,
+		"LOG_FILE":                       logFile,
+		"PERF_MODE":                      "k6",
+		"PERF_TARGET":                    "upload",
+		"PERF_K6_SUITE":                  "full-api",
+		"PERF_K6_WARMUP_DURATION":        "2s",
+		"BASE_URL":                       "http://127.0.0.1:8080",
+		"BEARER_TOKEN":                   "dev-token",
+		"UPLOAD_INLINE_DURATION":         "15s",
+		"UPLOAD_PRESIGNED_SINGLE_DURATION":"16s",
+		"UPLOAD_DIRECT_DURATION":         "17s",
+		"UPLOAD_ABORT_DURATION":          "18s",
+	})
+	if err != nil {
+		t.Fatalf("performance script failed: %v\noutput:\n%s", err, out)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read k6 log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 k6 invocations, got %d, logs=%q", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "2s|2s|2s|2s|run test/performance/upload-all-apis.js") {
+		t.Fatalf("unexpected warmup invocation: %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "15s|16s|17s|18s|run test/performance/upload-all-apis.js") {
+		t.Fatalf("unexpected measured invocation: %q", lines[1])
+	}
+}
+
+func TestPerformanceScriptFailsOnInvalidWarmupBoolean(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	scriptPath := filepath.Join(repoRoot, "scripts/test/performance.sh")
+
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "k6.log")
+	mockK6 := writeMockScript(t, tmpDir, "mock-k6.sh", "#!/usr/bin/env bash\nset -euo pipefail\necho \"$*\" >> \"${LOG_FILE}\"\n")
+
+	out, err := runScript(t, scriptPath, nil, map[string]string{
+		"K6_BIN":            mockK6,
+		"LOG_FILE":          logFile,
+		"PERF_MODE":         "k6",
+		"PERF_TARGET":       "upload",
+		"PERF_K6_SUITE":     "full-api",
+		"PERF_K6_WARMUP":    "maybe",
+		"BASE_URL":          "http://127.0.0.1:8080",
+		"BEARER_TOKEN":      "dev-token",
+	})
+	if err == nil {
+		t.Fatalf("expected performance script to fail, output:\n%s", out)
+	}
+	if !strings.Contains(out, "unsupported boolean value: maybe") {
+		t.Fatalf("expected invalid boolean hint, output:\n%s", out)
+	}
+	if _, statErr := os.Stat(logFile); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("expected k6 not to run, stat err=%v", statErr)
 	}
 }
 
