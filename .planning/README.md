@@ -22,8 +22,11 @@
   - `admin-service/`
   - `job-service/`
   - `delivery-validation/`
+  - `data-plane-auth/`
+  - `deployment-auth-guard/`
+  - `data-plane-metrics/`
 - 当前活跃：
-  - 当前无活跃模块；上一轮收尾项已随 `449f316`、`8db1b16`、`4d0f5cc` 落到 `main`
+  - `data-plane-storage-metrics/`
 
 当前代码事实：
 
@@ -35,6 +38,6 @@
 
 后续维护说明：
 
-1. 当前无活跃模块；现有模块均按归档状态维护
+1. 当前活跃模块为 `data-plane-storage-metrics/`
 2. 后续若出现新任务，再新增对应 `planning` 目录并按三件套（`task_plan.md`、`findings.md`、`progress.md`）维护
 3. 主工作树若存在本地 `.planning/` 脏改动，不要直接合并 `planning` 分支，先完成人工对比与清理后再合并
