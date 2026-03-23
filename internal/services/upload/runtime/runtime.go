@@ -90,9 +90,11 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 		clk,
 	)
 	abortUploadSession := commands.NewAbortUploadSessionHandler(sessions, storageAdapter, clk)
+	metricsRecorder := httptransport.NewMetricsRecorder(app.Metrics.Registry(), app.Config.App.ServiceName)
 
 	handler := httptransport.NewHandler(httptransport.Options{
 		Auth:                  authResolver,
+		Metrics:               metricsRecorder,
 		MaxInlineBodyBytes:    app.Config.Upload.MaxInlineSize,
 		CreateUploadSession:   createUploadSession,
 		GetUploadSession:      getUploadSession,

@@ -37,6 +37,7 @@ type RedirectByAccessTicketUseCase interface {
 
 type Options struct {
 	Auth                   AuthFunc
+	Metrics                MetricsRecorder
 	GetFile                GetFileUseCase
 	CreateAccessTicket     CreateAccessTicketUseCase
 	ResolveDownload        ResolveDownloadUseCase
@@ -49,6 +50,9 @@ type Handler struct {
 }
 
 func NewHandler(options Options) http.Handler {
+	if options.Metrics == nil {
+		options.Metrics = noopMetricsRecorder{}
+	}
 	handler := &Handler{
 		options: options,
 		mux:     http.NewServeMux(),
@@ -83,6 +87,7 @@ func (h *Handler) handleGetFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, requestID, err)
 		return
 	}
+	h.options.Metrics.RecordFileGet()
 
 	writeJSON(w, http.StatusOK, fileEnvelopeResponse{
 		RequestID: requestID,
@@ -121,6 +126,7 @@ func (h *Handler) handleCreateAccessTicket(w http.ResponseWriter, r *http.Reques
 		writeError(w, requestID, err)
 		return
 	}
+	h.options.Metrics.RecordAccessTicketIssue()
 
 	writeJSON(w, http.StatusCreated, accessTicketEnvelopeResponse{
 		RequestID: requestID,
@@ -135,11 +141,14 @@ func (h *Handler) handleCreateAccessTicket(w http.ResponseWriter, r *http.Reques
 func (h *Handler) handleResolveDownload(w http.ResponseWriter, r *http.Request) {
 	auth, requestID, err := h.authenticate(r)
 	if err != nil {
+		h.options.Metrics.RecordDownloadRedirectFailure(xerrors.CodeOf(err))
 		writeError(w, requestID, err)
 		return
 	}
 	if h.options.ResolveDownload == nil {
-		writeError(w, requestID, xerrors.New(xerrors.CodeInternalError, "resolve download handler is not configured", nil))
+		err = xerrors.New(xerrors.CodeInternalError, "resolve download handler is not configured", nil)
+		h.options.Metrics.RecordDownloadRedirectFailure(xerrors.CodeOf(err))
+		writeError(w, requestID, err)
 		return
 	}
 
@@ -149,9 +158,11 @@ func (h *Handler) handleResolveDownload(w http.ResponseWriter, r *http.Request) 
 		Auth:        auth,
 	})
 	if err != nil {
+		h.options.Metrics.RecordDownloadRedirectFailure(xerrors.CodeOf(err))
 		writeError(w, requestID, err)
 		return
 	}
+	h.options.Metrics.RecordDownloadRedirect()
 
 	writeRedirect(w, requestID, result.URL)
 }
@@ -159,7 +170,9 @@ func (h *Handler) handleResolveDownload(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) handleRedirectByAccessTicket(w http.ResponseWriter, r *http.Request) {
 	requestID := requestIDFromRequest(r, "")
 	if h.options.RedirectByAccessTicket == nil {
-		writeError(w, requestID, xerrors.New(xerrors.CodeInternalError, "redirect by access ticket handler is not configured", nil))
+		err := xerrors.New(xerrors.CodeInternalError, "redirect by access ticket handler is not configured", nil)
+		h.options.Metrics.RecordDownloadRedirectFailure(xerrors.CodeOf(err))
+		writeError(w, requestID, err)
 		return
 	}
 
@@ -167,9 +180,15 @@ func (h *Handler) handleRedirectByAccessTicket(w http.ResponseWriter, r *http.Re
 		Ticket: strings.TrimSpace(r.PathValue("ticket")),
 	})
 	if err != nil {
+		code := xerrors.CodeOf(err)
+		h.options.Metrics.RecordDownloadRedirectFailure(code)
+		if code == domain.CodeAccessTicketInvalid || code == domain.CodeAccessTicketExpired {
+			h.options.Metrics.RecordAccessTicketVerifyFailure(code)
+		}
 		writeError(w, requestID, err)
 		return
 	}
+	h.options.Metrics.RecordDownloadRedirect()
 
 	writeRedirect(w, requestID, result.URL)
 }

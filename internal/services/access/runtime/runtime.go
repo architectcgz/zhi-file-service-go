@@ -77,9 +77,11 @@ func Build(app *bootstrap.App) (bootstrap.RuntimeOptions, error) {
 		app.Config.Access.PrivatePresignTTL,
 		app.Config.Access.PublicURLEnabled,
 	)
+	metricsRecorder := httptransport.NewMetricsRecorder(app.Metrics.Registry(), app.Config.App.ServiceName)
 
 	handler := httptransport.NewHandler(httptransport.Options{
 		Auth:                   authResolver,
+		Metrics:                metricsRecorder,
 		GetFile:                getFile,
 		CreateAccessTicket:     createTicket,
 		ResolveDownload:        resolveDownload,

@@ -7,9 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/architectcgz/zhi-file-service-go/internal/platform/observability"
 	"github.com/architectcgz/zhi-file-service-go/internal/services/upload/app/commands"
 	"github.com/architectcgz/zhi-file-service-go/internal/services/upload/app/queries"
 	"github.com/architectcgz/zhi-file-service-go/internal/services/upload/app/view"
@@ -303,6 +305,119 @@ func TestAbortUploadSessionWritesResponse(t *testing.T) {
 	}
 }
 
+func TestHandlerRecordsUploadBusinessMetrics(t *testing.T) {
+	t.Parallel()
+
+	metrics := observability.NewMetrics(true)
+	handler := NewHandler(Options{
+		Auth: func(*http.Request) (domain.AuthContext, error) {
+			return newTestAuth(), nil
+		},
+		Metrics: NewMetricsRecorder(metrics.Registry(), "upload-service"),
+		CreateUploadSession: createUploadSessionFunc(func(_ context.Context, command commands.CreateUploadSessionCommand) (view.UploadSession, error) {
+			return sampleUploadSession(command.UploadMode, domain.SessionStatusInitiated), nil
+		}),
+		CompleteUploadSession: completeUploadSessionFunc(func(_ context.Context, _ commands.CompleteUploadSessionCommand) (view.CompletedUploadSession, error) {
+			time.Sleep(5 * time.Millisecond)
+			return view.CompletedUploadSession{
+				FileID:        "file-1",
+				UploadSession: sampleUploadSession(domain.SessionModeDirect, domain.SessionStatusCompleted),
+			}, nil
+		}),
+		AbortUploadSession: abortUploadSessionFunc(func(_ context.Context, _ commands.AbortUploadSessionCommand) (view.UploadSession, error) {
+			return sampleUploadSession(domain.SessionModeInline, domain.SessionStatusAborted), nil
+		}),
+	})
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/upload-sessions", bytes.NewBufferString(`{
+		"fileName":"avatar.png",
+		"contentType":"image/png",
+		"sizeBytes":182044,
+		"accessLevel":"PUBLIC",
+		"uploadMode":"PRESIGNED_SINGLE"
+	}`))
+	createReq.Header.Set("Authorization", "Bearer token")
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-Request-Id", "req-metrics-create-1")
+	createRes := httptest.NewRecorder()
+	handler.ServeHTTP(createRes, createReq)
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("unexpected create status: %d body=%s", createRes.Code, createRes.Body.String())
+	}
+
+	completeReq := httptest.NewRequest(http.MethodPost, "/api/v1/upload-sessions/upload-1/complete", bytes.NewBufferString(`{
+		"uploadedParts":[{"partNumber":1,"etag":"\"etag-1\"","sizeBytes":1024}]
+	}`))
+	completeReq.SetPathValue("uploadSessionId", "upload-1")
+	completeReq.Header.Set("Authorization", "Bearer token")
+	completeReq.Header.Set("Content-Type", "application/json")
+	completeReq.Header.Set("X-Request-Id", "req-metrics-complete-1")
+	completeRes := httptest.NewRecorder()
+	handler.ServeHTTP(completeRes, completeReq)
+	if completeRes.Code != http.StatusOK {
+		t.Fatalf("unexpected complete status: %d body=%s", completeRes.Code, completeRes.Body.String())
+	}
+
+	abortReq := httptest.NewRequest(http.MethodPost, "/api/v1/upload-sessions/upload-1/abort", bytes.NewBufferString(`{"reason":"cancelled"}`))
+	abortReq.SetPathValue("uploadSessionId", "upload-1")
+	abortReq.Header.Set("Authorization", "Bearer token")
+	abortReq.Header.Set("Content-Type", "application/json")
+	abortReq.Header.Set("X-Request-Id", "req-metrics-abort-1")
+	abortRes := httptest.NewRecorder()
+	handler.ServeHTTP(abortRes, abortReq)
+	if abortRes.Code != http.StatusOK {
+		t.Fatalf("unexpected abort status: %d body=%s", abortRes.Code, abortRes.Body.String())
+	}
+
+	metricsBody := scrapeMetrics(t, metrics)
+	for _, metricName := range []string{
+		"upload_session_create_total",
+		"upload_session_complete_total",
+		"upload_session_abort_total",
+		"upload_complete_duration_seconds_bucket",
+	} {
+		if !strings.Contains(metricsBody, metricName) {
+			t.Fatalf("expected metric %q in output: %s", metricName, metricsBody)
+		}
+	}
+}
+
+func TestHandlerRecordsUploadCompleteFailureMetric(t *testing.T) {
+	t.Parallel()
+
+	metrics := observability.NewMetrics(true)
+	handler := NewHandler(Options{
+		Auth: func(*http.Request) (domain.AuthContext, error) {
+			return newTestAuth(), nil
+		},
+		Metrics: NewMetricsRecorder(metrics.Registry(), "upload-service"),
+		CompleteUploadSession: completeUploadSessionFunc(func(context.Context, commands.CompleteUploadSessionCommand) (view.CompletedUploadSession, error) {
+			return view.CompletedUploadSession{}, xerrors.New(domain.CodeUploadHashMismatch, "hash mismatch", nil)
+		}),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/upload-sessions/upload-1/complete", bytes.NewBufferString(`{
+		"uploadedParts":[{"partNumber":1,"etag":"\"etag-1\"","sizeBytes":1024}]
+	}`))
+	req.SetPathValue("uploadSessionId", "upload-1")
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-Id", "req-complete-fail-1")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusConflict {
+		t.Fatalf("unexpected complete failure status: %d body=%s", res.Code, res.Body.String())
+	}
+
+	metricsBody := scrapeMetrics(t, metrics)
+	if !strings.Contains(metricsBody, `upload_session_complete_failed_total`) {
+		t.Fatalf("expected upload_session_complete_failed_total metric, got: %s", metricsBody)
+	}
+	if !strings.Contains(metricsBody, `error_code="UPLOAD_HASH_MISMATCH"`) {
+		t.Fatalf("expected UPLOAD_HASH_MISMATCH label, got: %s", metricsBody)
+	}
+}
+
 func TestHandlerWritesCanonicalErrorResponse(t *testing.T) {
 	t.Parallel()
 
@@ -365,6 +480,18 @@ func decodeJSONResponse(t *testing.T, raw []byte) map[string]any {
 		t.Fatalf("json.Unmarshal() error = %v body=%s", err, string(raw))
 	}
 	return payload
+}
+
+func scrapeMetrics(t *testing.T, metrics *observability.Metrics) string {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	res := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("unexpected metrics status: %d body=%s", res.Code, res.Body.String())
+	}
+	return res.Body.String()
 }
 
 func newTestAuth() domain.AuthContext {

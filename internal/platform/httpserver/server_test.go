@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,5 +66,52 @@ func TestProbesAndMetricsEndpoint(t *testing.T) {
 	}
 	if metricsRes.Header().Get("X-Request-Id") == "" {
 		t.Fatal("expected X-Request-Id on metrics response")
+	}
+}
+
+func TestBusinessRouteMetricsUseNormalizedPattern(t *testing.T) {
+	metrics := observability.NewMetrics(true)
+	business := http.NewServeMux()
+	business.HandleFunc("GET /api/v1/files/{fileId}", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	s := New(Options{
+		ServiceName: "access-service",
+		HTTP: config.HTTPConfig{
+			Port:         8081,
+			ReadTimeout:  time.Second,
+			WriteTimeout: time.Second,
+			IdleTimeout:  time.Second,
+		},
+		Metrics: metrics,
+		Handler: business,
+	})
+
+	h := s.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/file-1", nil)
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("unexpected business status: %d", res.Code)
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	metricsRes := httptest.NewRecorder()
+	h.ServeHTTP(metricsRes, metricsReq)
+	if metricsRes.Code != http.StatusOK {
+		t.Fatalf("unexpected /metrics status: %d", metricsRes.Code)
+	}
+
+	body := metricsRes.Body.String()
+	if !strings.Contains(body, `http_requests_total`) {
+		t.Fatalf("expected http_requests_total metric, got: %s", body)
+	}
+	if !strings.Contains(body, `route="/api/v1/files/{fileId}"`) {
+		t.Fatalf("expected normalized business route label, got: %s", body)
+	}
+	if strings.Contains(body, `route="/"`) {
+		t.Fatalf("expected metrics to avoid root route label, got: %s", body)
 	}
 }

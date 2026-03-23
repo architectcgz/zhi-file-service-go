@@ -245,6 +245,7 @@ func (a *App) registerRuntime(options RuntimeOptions) {
 		HTTP:           a.Config.HTTP,
 		Logger:         a.Logger,
 		Ready:          a.Ready,
+		Metrics:        a.Metrics,
 		MetricsHandler: a.Metrics.Handler(),
 		Handler:        options.Handler,
 	})

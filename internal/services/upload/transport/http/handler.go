@@ -51,6 +51,7 @@ type AbortUploadSessionUseCase interface {
 
 type Options struct {
 	Auth                  AuthFunc
+	Metrics               MetricsRecorder
 	MaxInlineBodyBytes    int64
 	CreateUploadSession   CreateUploadSessionUseCase
 	GetUploadSession      GetUploadSessionUseCase
@@ -67,6 +68,9 @@ type Handler struct {
 }
 
 func NewHandler(options Options) http.Handler {
+	if options.Metrics == nil {
+		options.Metrics = noopMetricsRecorder{}
+	}
 	handler := &Handler{
 		options: options,
 		mux:     http.NewServeMux(),
@@ -118,6 +122,7 @@ func (h *Handler) handleCreateUploadSession(w http.ResponseWriter, r *http.Reque
 		writeError(w, requestID, err)
 		return
 	}
+	h.options.Metrics.RecordSessionCreate()
 
 	writeJSON(w, http.StatusCreated, uploadSessionEnvelopeResponse{
 		RequestID: requestID,
@@ -305,6 +310,7 @@ func (h *Handler) handleCompleteUploadSession(w http.ResponseWriter, r *http.Req
 		})
 	}
 
+	startedAt := time.Now()
 	result, err := h.options.CompleteUploadSession.Handle(r.Context(), commands.CompleteUploadSessionCommand{
 		UploadSessionID: strings.TrimSpace(r.PathValue("uploadSessionId")),
 		UploadedParts:   uploadedParts,
@@ -314,9 +320,11 @@ func (h *Handler) handleCompleteUploadSession(w http.ResponseWriter, r *http.Req
 		Auth:            auth,
 	})
 	if err != nil {
+		h.options.Metrics.RecordSessionCompleteFailure(xerrors.CodeOf(err))
 		writeError(w, requestID, err)
 		return
 	}
+	h.options.Metrics.RecordSessionComplete(time.Since(startedAt))
 
 	writeJSON(w, http.StatusOK, completedUploadSessionEnvelopeResponse{
 		RequestID: requestID,
@@ -356,6 +364,7 @@ func (h *Handler) handleAbortUploadSession(w http.ResponseWriter, r *http.Reques
 		writeError(w, requestID, err)
 		return
 	}
+	h.options.Metrics.RecordSessionAbort()
 
 	writeJSON(w, http.StatusOK, uploadSessionEnvelopeResponse{
 		RequestID: requestID,
@@ -504,14 +513,14 @@ func mapUploadSession(session view.UploadSession) uploadSessionResponse {
 }
 
 type createUploadSessionRequest struct {
-	FileName    string            `json:"fileName"`
-	ContentType string            `json:"contentType"`
-	SizeBytes   int64             `json:"sizeBytes"`
+	FileName    string              `json:"fileName"`
+	ContentType string              `json:"contentType"`
+	SizeBytes   int64               `json:"sizeBytes"`
 	ContentHash *contentHashRequest `json:"contentHash"`
-	AccessLevel string            `json:"accessLevel"`
-	UploadMode  string            `json:"uploadMode"`
-	TotalParts  int               `json:"totalParts"`
-	Metadata    map[string]string `json:"metadata"`
+	AccessLevel string              `json:"accessLevel"`
+	UploadMode  string              `json:"uploadMode"`
+	TotalParts  int                 `json:"totalParts"`
+	Metadata    map[string]string   `json:"metadata"`
 }
 
 type contentHashRequest struct {
@@ -549,7 +558,7 @@ type uploadSessionEnvelopeResponse struct {
 }
 
 type completedUploadSessionEnvelopeResponse struct {
-	RequestID string                            `json:"requestId"`
+	RequestID string                             `json:"requestId"`
 	Data      completedUploadSessionDataResponse `json:"data"`
 }
 

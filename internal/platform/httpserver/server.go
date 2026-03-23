@@ -19,6 +19,7 @@ type Options struct {
 	HTTP           config.HTTPConfig
 	Logger         *slog.Logger
 	Ready          ReadyFunc
+	Metrics        *observability.Metrics
 	MetricsHandler http.Handler
 	Handler        http.Handler
 }
@@ -34,8 +35,12 @@ func New(options Options) *Server {
 	mux.HandleFunc("/live", liveHandler)
 	mux.HandleFunc("/ready", readyHandler(options.Ready))
 
-	if options.MetricsHandler != nil {
-		mux.Handle("/metrics", options.MetricsHandler)
+	metricsHandler := options.MetricsHandler
+	if metricsHandler == nil && options.Metrics != nil {
+		metricsHandler = options.Metrics.Handler()
+	}
+	if metricsHandler != nil {
+		mux.Handle("/metrics", metricsHandler)
 	}
 	if options.Handler != nil {
 		mux.Handle("/", options.Handler)
@@ -43,6 +48,7 @@ func New(options Options) *Server {
 
 	handler := http.Handler(mux)
 	handler = middleware.Logging(options.Logger, handler)
+	handler = observability.WrapHTTPMetrics(options.ServiceName, options.Metrics, handler)
 	handler = observability.WrapHTTP(options.ServiceName, handler)
 	handler = middleware.RequestID(handler)
 	return &Server{
