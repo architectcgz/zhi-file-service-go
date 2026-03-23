@@ -74,8 +74,12 @@ spec:
               value: "5m"
             - name: JOB_REPAIR_STUCK_COMPLETING_INTERVAL
               value: "2m"
+            - name: JOB_PROCESS_OUTBOX_EVENTS_INTERVAL
+              value: "15s"
             - name: JOB_FINALIZE_FILE_DELETE_INTERVAL
               value: "1m"
+            - name: JOB_CLEANUP_MULTIPART_INTERVAL
+              value: "10m"
             - name: JOB_FILE_DELETE_RETENTION
               value: "168h"
             - name: JOB_CLEANUP_ORPHAN_BLOBS_INTERVAL
@@ -123,4 +127,3 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: job-service
-

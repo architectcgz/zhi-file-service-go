@@ -82,6 +82,25 @@ func TestLoadReturnsValidationErrorForInvalidJobLockWindow(t *testing.T) {
 	}
 }
 
+func TestLoadJobServiceParsesPhase6Intervals(t *testing.T) {
+	setCommonEnv(t)
+	t.Setenv("REDIS_ADDR", "127.0.0.1:6379")
+	t.Setenv("JOB_PROCESS_OUTBOX_EVENTS_INTERVAL", "15s")
+	t.Setenv("JOB_CLEANUP_MULTIPART_INTERVAL", "12m")
+
+	cfg, err := Load(ServiceJob)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.Job.ProcessOutboxEventsInterval != 15*time.Second {
+		t.Fatalf("ProcessOutboxEventsInterval = %s, want %s", cfg.Job.ProcessOutboxEventsInterval, 15*time.Second)
+	}
+	if cfg.Job.CleanupMultipartInterval != 12*time.Minute {
+		t.Fatalf("CleanupMultipartInterval = %s, want %s", cfg.Job.CleanupMultipartInterval, 12*time.Minute)
+	}
+}
+
 func TestLoadAdminServiceParsesAllowedIssuers(t *testing.T) {
 	setCommonEnv(t)
 	t.Setenv("ADMIN_AUTH_ALLOWED_ISSUERS", "https://issuer-a.example.com, https://issuer-b.example.com")

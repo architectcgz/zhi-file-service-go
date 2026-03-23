@@ -485,9 +485,12 @@ internal/services/job/
 拥有的业务：
 
 - 过期 session 清理
+- stuck completing 修复
+- outbox 事件消费
+- 文件物理删除收口
+- multipart 残留清理
 - orphan object cleanup
 - 对账任务
-- outbox 投递
 
 说明：
 
@@ -633,12 +636,14 @@ internal/services/upload/app/complete_upload_test.go
 规则：
 
 - 需要真实 PostgreSQL / Redis / MinIO 的测试，统一放到 `test/integration`
+- 服务内 runtime / wiring 集成验证可以紧贴代码放，例如 `internal/services/job/runtime/runtime_integration_test.go`
 
 示例：
 
 ```text
 test/integration/upload_service_complete_test.go
 test/integration/access_service_presign_test.go
+internal/services/job/runtime/runtime_integration_test.go
 ```
 
 ## 10.3 契约测试
@@ -659,6 +664,7 @@ test/contract/admin_delete_file_contract_test.go
 规则：
 
 - 跨服务、带真实 HTTP 的测试放 `test/e2e`
+- 不把单服务 runtime job 闭环误归类为 E2E
 
 ## 10.5 压测
 

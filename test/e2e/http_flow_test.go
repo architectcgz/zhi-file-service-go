@@ -182,10 +182,10 @@ type deliverySession struct {
 	Status          uploaddomain.SessionStatus
 	TotalParts      int
 	UploadedParts   int
-	FileID          string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	CompletedAt     *time.Time
+	FileID      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	CompletedAt *time.Time
 }
 
 func newDeliveryState() *deliveryState {

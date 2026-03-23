@@ -271,8 +271,11 @@ span 命名统一：
 
 - `job.expire_upload_sessions`
 - `job.repair_stuck_completing`
+- `job.process_outbox_events`
 - `job.finalize_file_delete`
+- `job.cleanup_multipart`
 - `job.cleanup_orphan_blobs`
+- `job.reconcile_tenant_usage`
 
 ## 7. Grafana 仪表盘建议
 
