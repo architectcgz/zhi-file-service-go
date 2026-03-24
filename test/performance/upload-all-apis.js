@@ -118,6 +118,7 @@ function createUploadSession(body, operation) {
       "Idempotency-Key": idempotencyKey(`${operation}-create`),
     }),
     tags: {
+      name: "POST /api/v1/upload-sessions",
       operation: "create_upload_session",
       flow: operation,
     },
@@ -130,6 +131,7 @@ function getUploadSession(uploadSessionId, operation) {
       "X-Request-Id": requestId(`${operation}-get`),
     }),
     tags: {
+      name: "GET /api/v1/upload-sessions/:uploadSessionId",
       operation: "get_upload_session",
       flow: operation,
     },
@@ -150,6 +152,7 @@ function completeUploadSessionWithKey(uploadSessionId, body, operation, completi
         "Idempotency-Key": completionKey,
       }),
       tags: {
+        name: "POST /api/v1/upload-sessions/:uploadSessionId/complete",
         operation: "complete_upload_session",
         flow: operation,
       },
@@ -211,6 +214,7 @@ export function inlineCompleteFlow() {
       "X-Request-Id": requestId("inline-content"),
     }),
     tags: {
+      name: "PUT /api/v1/upload-sessions/:uploadSessionId/content",
       operation: "upload_session_content",
       flow: "inline",
     },
@@ -274,6 +278,7 @@ export function presignedSingleFlow() {
   const storageRes = http.put(rewriteStorageURL(putUrl), fixture.payload, {
     headers: created.putHeaders || {},
     tags: {
+      name: "PUT storage presigned single",
       operation: "storage_put_presigned_single",
       flow: "presigned-single",
     },
@@ -344,6 +349,7 @@ export function directMultipartFlow() {
         "X-Request-Id": requestId("direct-presign"),
       }),
       tags: {
+        name: "POST /api/v1/upload-sessions/:uploadSessionId/parts/presign",
         operation: "presign_upload_session_parts",
         flow: "direct",
       },
@@ -366,6 +372,7 @@ export function directMultipartFlow() {
     const storageRes = http.put(rewriteStorageURL(part.url), partBodies[part.partNumber], {
       headers: part.headers || {},
       tags: {
+        name: "PUT storage multipart part",
         operation: "storage_put_multipart_part",
         flow: "direct",
         part_number: String(part.partNumber),
@@ -382,6 +389,7 @@ export function directMultipartFlow() {
       "X-Request-Id": requestId("direct-list-parts"),
     }),
     tags: {
+      name: "GET /api/v1/upload-sessions/:uploadSessionId/parts",
       operation: "list_upload_session_parts",
       flow: "direct",
     },
@@ -455,6 +463,7 @@ export function abortFlow() {
         "Idempotency-Key": idempotencyKey("abort-session"),
       }),
       tags: {
+        name: "POST /api/v1/upload-sessions/:uploadSessionId/abort",
         operation: "abort_upload_session",
         flow: "abort",
       },
